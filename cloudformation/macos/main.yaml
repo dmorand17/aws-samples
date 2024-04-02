@@ -1,0 +1,234 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: 'AWS::LanguageExtensions'
+
+Parameters:
+  VpcId:
+    Description: Choose which VPC this should be deployed to
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>
+    Default: /devops/vpc-id
+  Subnet:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Subnet::Id>
+    Description: The subnet to deploy into
+    Default: /devops/app-subnet-2
+  HostId:
+    Type: String
+    Description: Pre-allocated EC2 Dedicated Host (mac2)
+  Agent:
+    Type: String
+    Default: vsts-agent-osx-arm64-3.220.2.tar.gz
+    Description: Should be ARM if mac2
+  AzureSecret:
+    Type: String
+    Default: azure/devops
+  Bucket:
+    Type: String
+    Default: s3://downloads-us-east-2
+    Description: The bucket with XCODE and Azure DevOps agent binaries
+
+Mappings:
+  Configuration:
+    us-east-2:
+      ImageId: ami-0443fe38484268e21
+    us-east-1:
+      ImageId: ami-04a8015f31efaeab1
+    ec2:
+      InstanceType: mac2.metal
+    log:
+      RetentionInDays: 365
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Azure DevOps Agent
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+  LogGroup:
+    DeletionPolicy: Retain
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !FindInMap [ Configuration, log, RetentionInDays ]
+
+  Parameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value:
+        Fn::ToJsonString:
+          agent:
+            logfile: /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
+          logs:
+            logs_collected:
+              files:
+                collect_list:
+                  - file_path: /opt/azure/agent-*/logs/**
+                    log_group_name: !Ref LogGroup
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Effect: Allow
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+      Policies:
+        - PolicyName: !Ref AWS::StackName
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref Role
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [Configuration, !Ref AWS::Region, ImageId]
+      InstanceType: !FindInMap [Configuration, ec2, InstanceType]
+      SubnetId: !Ref Subnet
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      Tenancy: host
+      HostId: !Ref HostId
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash
+            InstanceId=`curl http://169.254.169.254/latest/meta-data/instance-id`
+            
+            /usr/libexec/remotectl dumpstate | grep BridgeVersion
+            # First resize the file system to enjoy the full space offered by our EBS volume
+            PDISK=$(diskutil list physical external | head -n1 | cut -d" " -f1)
+            APFSCONT=$(diskutil list physical external | grep "Apple_APFS" | tr -s " " | cut -d" " -f8)
+            yes | sudo diskutil repairDisk $PDISK
+            sudo diskutil apfs resizeContainer $APFSCONT 0
+            # Download
+            mkdir /Users/Shared/Downloads
+            aws s3 sync ${Bucket} /Users/Shared/Downloads
+            
+            # Install Xcode
+            cd /Users/Shared/Downloads
+            xip --expand xcode.xip
+            mv Xcode.app /Applications
+            
+            installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/XcodeSystemResources.pkg -target /
+            installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/CoreTypes.pkg -target /
+            installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/MobileDevice.pkg -target /
+            installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/MobileDeviceDevelopment.pkg -target /
+            
+            hdiutil mount ./xcode-cli.dmg 
+            installer -pkg /Volumes/Command\ Line\ Developer\ Tools/Command\ Line\ Tools.pkg -target / 
+            hdiutil unmount /Volumes/Command\ Line\ Developer\ Tools/
+            
+            # Accept the Xcode license
+            xcodebuild -license accept 
+            xcode-select -p
+            
+            gem install xcpretty
+            
+            # Get Azure secret (approach w/o jq as we have a simple json)
+            SECRET=$(aws secretsmanager get-secret-value --secret-id ${AzureSecret} --query SecretString --region ${AWS::Region} --output text)
+            declare "$(echo $SECRET | cut -f2 -d\")=$(echo $SECRET | cut -f4 -d\")"
+            declare "$(echo $SECRET | cut -f6 -d\")=$(echo $SECRET | cut -f8 -d\")"
+            declare "$(echo $SECRET | cut -f10 -d\")=$(echo $SECRET | cut -f12 -d\")"
+                     
+            # Install Azure DevOps Agents
+            mkdir -p /opt/azure/agent-a
+            tar zxvf ${Agent} --directory /opt/azure/agent-a
+            mkdir -p /opt/azure/agent-b
+            tar zxvf ${Agent} --directory /opt/azure/agent-b
+            
+            TEMPLATE_PATH=./bin/vsts.agent.plist.template
+            USER_HOME=""
+            
+            cd /opt/azure/agent-a
+            sudo su ec2-user ./config.sh --unattended \
+              --agent "${AWS::AccountId}.$InstanceId.a" \
+              --url "https://dev.azure.com/$organization" \
+              --auth PAT \
+              --token $pat \
+              --pool "$pool" \
+              --work "_work" \
+              --replace \
+              --acceptTeeEula & wait $!
+            
+            SVC_NAME="vsts.agent.$organization.$pool.${AWS::AccountId}.$InstanceId.a"
+            AGENT_ROOT=`pwd`
+            LOG_PATH="$AGENT_ROOT/logs"
+            mkdir -p $LOG_PATH
+            sed "s/<key>UserName<\/key>//g; s/<string>{{User}}<\/string>//g; s/{{SvcName}}/$SVC_NAME/g; s@{{AgentRoot}}@$AGENT_ROOT@g; s@{{UserHome}}@$USER_HOME@g;" "$TEMPLATE_PATH" > "/Library/LaunchDaemons/$SVC_NAME.plist"
+            cp ./bin/runsvc.sh ./runsvc.sh
+            launchctl load -S StandardIO /Library/LaunchDaemons/$SVC_NAME.plist
+            
+            cd /opt/azure/agent-b
+            sudo su ec2-user ./config.sh --unattended \
+              --agent "${AWS::AccountId}.$InstanceId.b" \
+              --url "https://dev.azure.com/$organization" \
+              --auth PAT \
+              --token $pat \
+              --pool "$pool" \
+              --work "_work" \
+              --replace \
+              --acceptTeeEula & wait $!
+            
+            SVC_NAME="vsts.agent.$organization.$pool.${AWS::AccountId}.$InstanceId.b"
+            AGENT_ROOT=`pwd`
+            LOG_PATH="$AGENT_ROOT/logs"
+            mkdir -p $LOG_PATH
+            sed "s/<key>UserName<\/key>//g; s/<string>{{User}}<\/string>//g; s/{{SvcName}}/$SVC_NAME/g; s@{{AgentRoot}}@$AGENT_ROOT@g; s@{{UserHome}}@$USER_HOME@g;" "$TEMPLATE_PATH" > "/Library/LaunchDaemons/$SVC_NAME.plist"
+            cp ./bin/runsvc.sh ./runsvc.sh
+            launchctl load -S StandardIO /Library/LaunchDaemons/$SVC_NAME.plist
+            
+            # Install CloudWatch agent
+            cd /Users/Shared/Downloads
+            curl -O https://s3.${AWS::Region}.amazonaws.com/amazoncloudwatch-agent-${AWS::Region}/darwin/arm64/latest/amazon-cloudwatch-agent.pkg
+            installer -pkg amazon-cloudwatch-agent.pkg -target /
+            /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c ssm:${Parameter}
+           
+            # Respond back to CloudFormation
+            instance=`curl http://169.254.169.254/latest/meta-data/instance-id`
+            curl -X PUT -H 'Content-Type:' --data-binary '{"Status":"SUCCESS","Reason":"Configuration Complete","UniqueId":"$instance","Data":"Application has completed configuration."}' "${WaitConditionHandle}"
+
+  WaitConditionHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  WaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn: Instance
+    Properties:
+      Handle: !Ref WaitConditionHandle
+      Timeout: 2100 # wait 35 minutes
+      Count: 1

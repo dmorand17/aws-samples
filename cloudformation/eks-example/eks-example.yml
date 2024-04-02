@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Amazon EKS - Cluster
+Parameters:
+  pVpcId:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+    AllowedPattern: ".+"
+  pSubnetA:
+    Description: Subnet A
+    Type: String
+    AllowedPattern: ".+"
+  pSubnetB:
+    Description: Subnet B
+    Type: String
+    AllowedPattern: ".+"
+  pEKSClusterName:
+    Description: Name of the EKS Cluster
+    Type: String
+    Default: EKSCluster
+  pEKSVersion:
+    Description: Version of the EKS Cluster
+    Type: String
+    Default: "1.21"
+    AllowedValues:
+      - "1.21"
+      - "1.22"
+      - "1.23"
+      - "1.24"
+      - "1.25"
+  ProjectAdminArn:
+    Description: The project admin ARN
+    Type: String
+  DevOpsEngineerArn:
+    Description: The devops engineer ARN
+    Type: String
+  pEKSNodeGroupName:
+    Description: Name of the EKS NodeGroup
+    Type: String
+    Default: EKSNodeGroup
+  pNodeAutoScalingGroupMinSize:
+    Description: Minimal size of Node Group ASG
+    Type: Number
+    Default: 1
+  pNodeAutoScalingGroupDesiredCapacity:
+    Description: Desired capacity of Node Group ASG.
+    Type: Number
+    Default: 1
+  pNodeAutoScalingGroupMaxSize:
+    Description: Maximum size of Node Group ASG. Set to at least 1 greater than NodeAutoScalingGroupDesiredCapacity
+    Type: Number
+    Default: 4
+  pNodeVolumeSize:
+    Type: Number
+    Default: 20
+    Description: |
+      The initial size of the node volume.
+      To expand the size later on, you need to do it using the AWS GUI.
+  pNodeLaunchTemplateName:
+    Description: Node Launch Template Name
+    Type: String
+    Default: "EKSNodeLaunchTemplate"
+  pDisableIMDSv1:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "false"
+      - "true"
+  pNodeImageId:
+    Type: String
+    Default: ""
+    Description: (Optional) Specify your own custom image ID.
+  pNodeInstanceType:
+    Type: String
+    Default: t2.small
+    # TODO: reduce the number of allowed instance types to minimal/approved
+    AllowedValues:
+      - a1.large
+      - a1.medium
+      - a1.metal
+      - a1.xlarge
+      - c1.medium
+      - c1.xlarge
+      - c3.2xlarge
+      - c3.4xlarge
+      - c3.8xlarge
+      - c3.large
+      - c4.large
+      - c4.xlarge
+      - m1.large
+      - m1.medium
+      - m1.small
+      - m1.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m2.xlarge
+      - m3.2xlarge
+      - m3.large
+      - m3.medium
+      - m4.large
+      - m5ad.large
+      - m5d.large
+      - m5dn.large
+      - m5n.large
+      - m6g.large
+      - m6g.medium
+      - m6gd.large
+      - m6gd.medium
+      - m6gd.metal
+      - t1.micro
+      - t2.2xlarge
+      - t2.large
+      - t2.medium
+      - t2.micro
+      - t2.nano
+      - t2.small
+      - t2.xlarge
+      - t3.2xlarge
+      - t3.large
+      - t3.medium
+      - t3.micro
+      - t3.nano
+      - t3.small
+      - t3.xlarge
+    ConstraintDescription: Must be a valid EC2 instance type
+    Description: EC2 instance type for the node instances
+  pBootstrapArguments:
+    Type: String
+    Default: "--use-max-pods false --kubelet-extra-args --max-pods=24"
+    Description: "Arguments to pass to the bootstrap script. See files/bootstrap.sh in https://github.com/awslabs/amazon-eks-ami
+    Max Pods is determined by the equation maxPods = (number of interfaces - 1) * (max IPv4 addresses per interface - 1) + 2
+    To get the variables for each flavor t3.medium = 12, t3.large = 24, t3.xlarge = "
+Metadata:
+  "AWS::CloudFormation::Interface":
+    ParameterGroups:
+      - Label:
+          default: EKS Cluster and worker Node Configuration
+        Parameters:
+          - pEKSClusterName
+          - pEKSVersion
+          - pVpcId
+          - pSubnetA
+          - pSubnetB
+          - pEKSNodeGroupName
+          - pNodeAutoScalingGroupMinSize
+          - pNodeAutoScalingGroupDesiredCapacity
+          - pNodeAutoScalingGroupMaxSize
+          - pNodeInstanceType
+          - pNodeImageId
+          - pNodeVolumeSize
+          - pBootstrapArguments
+          - pDisableIMDSv1
+Conditions:
+  HasNodeImageId: !Not
+    - "Fn::Equals":
+        - !Ref pNodeImageId
+        - ""
+  IMDSv1Disabled:
+    "Fn::Equals":
+      - !Ref pDisableIMDSv1
+      - "true"
+Resources:
+  EKSClusterQS:
+    DependsOn:
+      - rClusterControlPlaneSecurityGroup
+      - IAMRoleEKSClusterRole
+    Type: AWSQS::EKS::Cluster
+    Properties:
+      Name: !Ref pEKSClusterName
+      Version: !Ref pEKSVersion
+      RoleArn: !GetAtt IAMRoleEKSClusterRole.Arn
+      KubernetesApiAccess:
+        Roles:
+          - Arn: !Ref ProjectAdminArn
+            Username: "AdminRole"
+            Groups: [ "system:masters" ]
+          - Arn: !Ref DevOpsEngineerArn
+            Username: "AdminRole"
+            Groups: [ "system:masters" ]
+      ResourcesVpcConfig:
+        # Worker nodes should only use the private API endpoint
+        # See https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: true
+        SecurityGroupIds:
+          - !Ref rClusterControlPlaneSecurityGroup
+        SubnetIds:
+          - !Ref pSubnetA
+          - !Ref pSubnetB
+
+  VPCCNIAddOn:
+    DependsOn: EKSClusterQS
+    Type: AWS::EKS::Addon
+    Properties:
+      AddonName: vpc-cni
+      ClusterName: !Ref pEKSClusterName
+
+  rClusterControlPlaneSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Security group for all nodes in the cluster
+      SecurityGroupEgress:
+        - IpProtocol: 'tcp'
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: !Sub kubernetes.io/cluster/${pEKSClusterName}
+          Value: shared
+      VpcId: !Ref pVpcId
+
+  IAMRoleEKSClusterRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub EKSClusterRole-${AWS::Region}-${pEKSClusterName}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: eks.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy"
+      Tags:
+        - Key: StackID
+          Value: !Ref 'AWS::StackId'
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref 'AWS::StackName'
+              - ECKSClusterRole

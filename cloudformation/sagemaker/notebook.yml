@@ -1,0 +1,32 @@
+Parameters:
+  NotebookInstanceType: 
+    Type: String
+    Default: ml.t2.medium
+    AllowedValues:
+      - ml.t2.medium
+      - ml.t3.medium
+  RootAccess:
+    Type: String
+    Default: Disabled
+    AllowedValues:  
+      - Enabled
+      - Disabled
+
+Resources:
+  SageMakerNotebookInstance:
+    Type: AWS::SageMaker::NotebookInstance
+    Properties:
+      InstanceType: !Ref NotebookInstanceType
+      # Disable root access to restrict permissions
+      RootAccess: !Ref RootAccess
+      RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MySageMakerRole
+      LifecycleConfigName: !GetAtt SageMakerLifecycleConfig.NotebookInstanceLifecycleConfigName
+  
+  SageMakerLifecycleConfig:
+    Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
+    Properties: 
+      OnCreate:
+        - Content: !Base64
+            'Fn::Sub': |
+              #!/bin/bash
+              python --version

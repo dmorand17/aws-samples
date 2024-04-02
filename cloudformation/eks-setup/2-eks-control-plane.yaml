@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Stack for creating an basic EKS control plane.
+
+Parameters:
+  Name:
+    Type: String
+    Description: EKS cluster name.
+  Vpc:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to create the control plane and SGs in.
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets to create the control plane in. Recommend picking both public
+      and private subnets.
+  Version:
+    Type: String
+    Description: Kubernetes master version.
+    AllowedValues:
+      - '1.16'
+      - '1.15'
+      - '1.14'
+    Default: '1.16'
+    ConstraintDescription: Pick a version for the K8s master.
+
+Resources:
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+        - '-'
+        - - !Ref 'AWS::StackName'
+          - cluster-role
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Cluster communication with worker nodes
+      VpcId: !Ref 'Vpc'
+  ControlPlane:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref 'Name'
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref 'ControlPlaneSecurityGroup'
+        SubnetIds: !Ref 'Subnets'
+      RoleArn: !GetAtt 'ClusterRole.Arn'
+      Version: !Ref 'Version'
+Outputs:
+  ClusterArn:
+    Value: !GetAtt 'ControlPlane.Arn'
+  ApiEndpoint:
+    Value: !GetAtt 'ControlPlane.Endpoint'
+  CertificateAuthorityData:
+    Value: !GetAtt 'ControlPlane.CertificateAuthorityData'

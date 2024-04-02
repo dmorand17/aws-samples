@@ -1,0 +1,371 @@
+Conditions:
+  IsWS: !Equals 
+    - !Ref IsWorkshopStudioEnv
+    - "yes"
+
+Resources:
+  keycloakvpc:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+  pubsubnet:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref keycloakvpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZoneId: !Ref AZID
+      MapPublicIpOnLaunch: true
+
+  vpcpubsubnetroutetable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref keycloakvpc
+
+  vpcpubsubnetroutetableassociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: vpcpubsubnetroutetable
+      SubnetId:
+        Ref: pubsubnet
+  
+  vpcpubsubnetdefaultroute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: vpcIGW
+      RouteTableId:
+        Ref: vpcpubsubnetroutetable
+    DependsOn:
+      - keycloakvpc
+      - vpcIGWattachment
+
+  vpcIGW:
+    Type: AWS::EC2::InternetGateway
+
+  vpcIGWattachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId:
+        Ref: vpcIGW
+      VpcId:
+        Ref: keycloakvpc
+
+  keycloaksg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: allow inbound Keycloak traffic
+      GroupName: keycloak_sg
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      VpcId: !Ref keycloakvpc
+
+  keycloakec2role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - Fn::Join:
+            - ""
+            - - "arn:"
+              - Ref: AWS::Partition
+              - :iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  keycloakserverInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: keycloakec2role
+
+  keycloakserver:
+    Type: AWS::EC2::Instance
+    Properties:
+      #AvailabilityZone: !Ref AZName
+      IamInstanceProfile:
+        Ref: keycloakserverInstanceProfile
+      ImageId:
+        Ref: SsmParameterValueAmznLinux
+      InstanceType: t2.micro
+      SecurityGroupIds:
+        - Fn::GetAtt:
+            - keycloaksg
+            - GroupId
+      SubnetId: !Ref pubsubnet
+      Tags:
+        - Key: Name
+          Value: keycloak-demo-1
+        - Key: Stage
+          Value: prod
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          sudo yum update -y
+          sudo amazon-linux-extras install -y docker
+          sudo systemctl start docker
+          sudo usermod -a -G docker ec2-user
+          sudo systemctl enable docker
+          (echo "AA"; echo "BB"; echo "CC"; echo "DD"; echo "EE"; echo "FF"; echo "GG") | openssl req -newkey rsa:2048 -nodes -keyout keycloak-server.key.pem -x509 -days 3650 -out keycloak-server.crt.pem
+          sudo mkdir /opt/certs
+          sudo mv keycloak-server.* /opt/certs
+          sudo chmod 655 /opt/certs/*
+          sudo docker run -d -p 80:8080 -p 443:8443 -v /opt/certs:/opt/certs -e KC_HTTPS_CERTIFICATE_FILE=/opt/certs/keycloak-server.crt.pem -e KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/certs/keycloak-server.key.pem -e KEYCLOAK_ADMIN=admin -e KEYCLOAK_ADMIN_PASSWORD=admin --name key quay.io/keycloak/keycloak:22.0.4 start-dev
+          sleep 120
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh update realms/master -s sslRequired=NONE"
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh create groups -r master -s name=Admins;./kcadm.sh create groups -r master -s name=SA;./kcadm.sh create groups -r master -s name=ML_SME_SA;./kcadm.sh create groups -r master -s name=DB_SME_SA"
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh create users -r master -b '{\"enabled\":\"true\",\"username\":\"martha_rivera\",\"email\":\"martha_rivera@example.com\",\"emailVerified\":\"true\",\"firstName\":\"martha_rivera\",\"groups\":[\"Admins\"],\"credentials\":[{\"type\":\"password\",\"value\":\"re:Invent2023\",\"temporary\":\"false\"}]}'"
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh create users -r master -b '{\"enabled\":\"true\",\"username\":\"pat_candella\",\"email\":\"pat_candella@example.com\",\"emailVerified\":\"true\",\"firstName\":\"pat_candella\",\"groups\":[\"SA\"],\"credentials\":[{\"type\":\"password\",\"value\":\"re:Invent2023\",\"temporary\":\"false\"}]}'"
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh create users -r master -b '{\"enabled\":\"true\",\"username\":\"mateo_jackson\",\"email\":\"mateo_jackson@example.com\",\"emailVerified\":\"true\",\"firstName\":\"mateo_jackson\",\"groups\":[\"DB_SME_SA\"],\"credentials\":[{\"type\":\"password\",\"value\":\"re:Invent2023\",\"temporary\":\"false\"}]}'"
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh create users -r master -b '{\"enabled\":\"true\",\"username\":\"john_doe\",\"email\":\"john_doe@example.com\",\"emailVerified\":\"true\",\"firstName\":\"john_doe\",\"groups\":[\"ML_SME_SA\"],\"credentials\":[{\"type\":\"password\",\"value\":\"re:Invent2023\",\"temporary\":\"false\"}]}'"
+          sudo docker exec key /bin/bash -c "cd /opt/keycloak/bin;./kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin;./kcadm.sh create users -r master -b '{\"enabled\":\"true\",\"username\":\"mary_major\",\"email\":\"mary_major@example.com\",\"emailVerified\":\"true\",\"firstName\":\"mary_major\",\"credentials\":[{\"type\":\"password\",\"value\":\"re:Invent2023\",\"temporary\":\"false\"}]}'"
+    DependsOn:
+      - keycloakec2role
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Condition: IsWS
+    Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - arn:aws:iam::aws:policy/AmazonS3FullAccess
+          - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        Path: "/"
+  
+  LambdaFunctionS3:
+    Type: AWS::Lambda::Function
+    Condition: IsWS
+    Properties:
+      FunctionName: copyS3DataFunction
+      Description: Lambda Function with code to copy sample data to S3 bucket
+      Handler: "index.lambda_handler"
+      Runtime: python3.9
+      Timeout: 300
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import logging
+          import threading
+          import boto3
+          import cfnresponse
+          import os
+          from botocore.exceptions import ClientError
+
+          # Initial setup
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def copy_objects(source_bucket, dest_bucket, prefix, objects):
+              s3 = boto3.client('s3')
+              for o in objects:
+                  if o == 'EQ/whitepapers_acl.json':
+                    key = prefix + o
+                    buffer = s3.get_object(Bucket=source_bucket, Key=key)
+                    content = buffer['Body'].read().decode("utf-8");
+                    new_content = content.replace("NAME-OF-DATASOURCE-S3-BUCKET", dest_bucket)
+                    s3.put_object(Bucket=dest_bucket, Key=o, Body=new_content)
+                    print('Update and copy ACL file = %s' % key)
+                  else:
+                    key = prefix + o
+                    copy_source = {
+                      'Bucket': source_bucket,
+                      'Key': key
+                    }
+                    print('copy_source: %s' % copy_source)
+                    print('dest_bucket = %s'%dest_bucket)
+                    print('key = %s' %o)
+                    s3.copy_object(CopySource=copy_source, Bucket=dest_bucket,
+                      Key=o)
+
+          def delete_objects(bucket, prefix, objects):
+              s3 = boto3.client('s3')
+              objects = {'Objects': [{'Key': prefix + o} for o in objects]}
+              s3.delete_objects(Bucket=bucket, Delete=objects)
+
+          def timeout(event, context):
+              logging.error('Execution is about to time out, sending failure response to CloudFormation')
+              cfnresponse.send(event, context, cfnresponse.FAILED, {}, None)
+
+          def lambda_handler(event, context):
+              # make sure we send a failure to CloudFormation if the function
+              # is going to timeout
+              timer = threading.Timer((context.get_remaining_time_in_millis()
+                      / 1000.00) - 0.5, timeout, args=[event, context])
+              timer.start()
+              print('Received event: %s' % json.dumps(event))
+              status = cfnresponse.SUCCESS
+              try:
+                  source_bucket = event['ResourceProperties']['SourceBucket']
+                  dest_bucket = event['ResourceProperties']['DestBucket']
+                  prefix = event['ResourceProperties']['Prefix']
+                  objects = event['ResourceProperties']['Objects']
+                  if event['RequestType'] == 'Delete':
+                      delete_objects(dest_bucket, prefix, objects)
+                  else:
+                      copy_objects(source_bucket, dest_bucket, prefix, objects)
+              except Exception as e:
+                  logging.error('Exception: %s' % e, exc_info=True)
+                  status = cfnresponse.FAILED
+              finally:
+                  timer.cancel()
+                  cfnresponse.send(event, context, status, {}, None)
+
+  S3CopyCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: IsWS
+    Properties:
+      ServiceToken: !GetAtt LambdaFunctionS3.Arn
+      SourceBucket: !Ref AssetBucketName
+      DestBucket: !Ref S3Bucket
+      Prefix: !Ref AssetBucketPrefix
+      Objects:
+        - EQ/whitepapers_acl.json
+        - Data/Databases/modernization-rdbms-dynamodb.pdf
+        - Data/Databases/dynamodb-hierarchical-data-model.pdf
+        - Data/Databases/dynamodb-dg.pdf
+        - Data/Databases/migration-large-mysql-mariadb-databases.pdf
+        - Data/Databases/dynamodb-data-modeling.pdf
+        - Data/Databases/dr-standard-edition-amazon-rds.pdf
+        - Data/Databases/tuning-postgresql-parameters.pdf
+        - Data/Security/introduction-aws-security.pdf
+        - Data/Security/building-a-data-perimeter-on-aws.pdf
+        - Data/Security/security-overview-amazon-api-gateway.pdf
+        - Data/Security/aws-best-practices-ddos-resiliency.pdf
+        - Data/Security/building-scalable-secure-multi-vpc-network-infrastructure.pdf
+        - Data/Security/security-reference-architecture.pdf
+        - Data/Security/AWS_Data_Classification.pdf
+        - Data/General/aws-privatelink.pdf
+        - Data/General/ec2-networking-for-telecom.pdf
+        - Data/General/overview-aws-cloud-adoption-framework.pdf
+        - Data/General/aws-overview.pdf
+        - Data/General/cloud-design-patterns.pdf
+        - Data/General/aws-vpc-connectivity-options.pdf
+        - Data/General/vpc-ug.pdf
+        - Data/General/hybrid-connectivity.pdf
+        - Data/General/overview-aws-cloud-data-migration-services.pdf
+        - Data/Machine_Learning/comprehend-dg.pdf
+        - Data/Machine_Learning/mlops-checklist.pdf
+        - Data/Machine_Learning/sagemaker-studio-admin-best-practices.pdf
+        - Data/Machine_Learning/transcribe-dg.pdf
+        - Data/Machine_Learning/bedrock-ug.pdf
+        - Data/Machine_Learning/sagemaker-dg.pdf
+        - Data/Machine_Learning/kendra-dg.pdf
+        - Data/Machine_Learning/textract-dg.pdf
+        - Data/Machine_Learning/lex2.0.pdf
+        - Data/Well_Architected/analytics-lens.pdf
+        - Data/Well_Architected/container-build-lens.pdf
+        - Data/Well_Architected/wellarchitected-reliability-pillar.pdf
+        - Data/Well_Architected/wellarchitected-iot-lens.pdf
+        - Data/Well_Architected/wellarchitected-serverless-applications-lens.pdf
+        - Data/Well_Architected/operational-readiness-reviews.pdf
+        - Data/Well_Architected/wellarchitected-saas-lens.pdf
+        - Data/Well_Architected/wellarchitected-security-pillar.pdf
+        - Data/Well_Architected/wellarchitected-sustainability-pillar.pdf
+        - Data/Well_Architected/wellarchitected-operational-excellence-pillar.pdf
+        - Data/Well_Architected/wellarchitected-machine-learning-lens.pdf
+        - Data/Well_Architected/wellarchitected-cost-optimization-pillar.pdf
+        - Data/Well_Architected/healthcare-industry-lens.pdf
+        - Data/Well_Architected/wellarchitected-performance-efficiency-pillar.pdf
+        - Data/Well_Architected/wellarchitected-framework.pdf
+        - Data/Well_Architected/government-lens.pdf
+        - Data/Best_Practices/cross-domain-solutions-on-aws.pdf
+        - Data/Best_Practices/building-data-lakes.pdf
+        - Data/Best_Practices/travel-hospitality-account-security-ra.pdf
+        - Data/Best_Practices/microservices-on-aws.pdf
+        - Data/Best_Practices/horizon7-on-vmc-with-fsx.pdf
+        - Data/Best_Practices/aws-best-practices-ddos-resiliency.pdf
+        - Data/Best_Practices/devops-guidance.pdf
+        - Data/Best_Practices/AmazonS3BestPractices.pdf
+  
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+          BlockPublicAcls: Yes
+          BlockPublicPolicy: Yes
+          IgnorePublicAcls: Yes
+          RestrictPublicBuckets: Yes
+
+Parameters:
+  SsmParameterValueAmznLinux:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-x86_64-gp2
+  AssetBucketName:
+    Type: String
+    Default: "Not-needed-for-self-paced-lab-in-customer-account"
+    Description: Name of the event asset bucket. For self paced labs in customer account, please leave the default value as is.
+  AssetBucketPrefix:
+    Type: String
+    Default: "Not-needed-for-self-paced-lab-in-customer-account"
+    Description: Prefix for the asset bucket. For self paced labs in customer account, please leave the default value as is.
+  AZName: 
+    Type: String
+    Description: Availability Zone Name
+  AZID: 
+    Type: String
+    Description: Availability Zone ID
+  IsWorkshopStudioEnv:
+    Type: String
+    Default: "no"
+    AllowedValues:
+      - "no"
+      - "yes"
+    Description: Whether this stack is being deployed in a Workshop Studio environment or not. If not sure, leave as default of "no".
+
+Outputs:
+  keycloakip:
+    Description: Keycloak Service IP address
+    Value:
+      Fn::GetAtt:
+        - keycloakserver
+        - PublicIp
+  keycloakurl:
+    Description: Keycloak Service URL
+    Value:
+      Fn::Join:
+        - ""
+        - - https://
+          - Fn::GetAtt:
+              - keycloakserver
+              - PublicDnsName
+          - /
+  keycloakuser:
+    Description: Keycloak Admin user name
+    Value: admin
+  keycloakpwd:
+    Description: Keycloak Admin password
+    Value: admin
+  s3bucket:
+    Description: Your S3 bucket to be used as a data source
+    Value: 
+      Fn::Join:
+        - ""
+        - - "https://console.aws.amazon.com/s3/home?bucket="
+          - !Ref S3Bucket
+  keycloaksecuritygroup:
+    Description: The security group of your Keycloak server
+    Value:
+      Fn::Join:
+        - ""
+        - - "https://console.aws.amazon.com/ec2/home?region="
+          - !Ref AWS::Region
+          - "#ModifyInboundSecurityGroupRules:securityGroupId="
+          - !GetAtt keycloaksg.GroupId

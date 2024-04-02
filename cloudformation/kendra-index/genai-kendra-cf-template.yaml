@@ -1,0 +1,290 @@
+# Copyright 2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create a Kendra Index and synchronize data from an S3 bucket.
+
+Parameters:
+  KendraEdition:
+    Description: 'Choose the Kendra Index Edition'
+    Type: String
+    Default: 'DEVELOPER_EDITION'
+    AllowedValues:
+      - 'DEVELOPER_EDITION'
+      - 'ENTERPRISE_EDITION'
+  
+  S3DataBucket:
+    Description: 'REQUIRED. S3 bucket containing documents for Kendra ingestion. Specify only bucket name, not the S3 URI or URL. Make sure the S3 bucket is in the same region where this CloudFormation template is being run.'
+    Type: String
+  
+  SyncInterval:
+    Description: 'Interval for Kendra data source synchronization'
+    Type: String
+    Default: '1Day'
+    AllowedValues:
+      - '12Hours'
+      - '1Day'
+      - '1Week'
+
+Mappings:
+  SyncSchedules:
+    12Hours: 
+      schedule: 'rate(12 hours)'
+    1Day: 
+      schedule: 'rate(1 day)'
+    1Week: 
+      schedule: 'rate(7 days)'
+
+Resources:
+  ##Create the Role needed to create a Kendra Index
+  KendraIndexRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: kendra.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'cloudwatch:namespace': 'Kendra'
+                Action:
+                  - 'cloudwatch:PutMetricData'
+              - Effect: Allow
+                Resource: '*'
+                Action: 'logs:DescribeLogGroups'
+              - Effect: Allow
+                Resource: !Sub
+                  - 'arn:aws:logs:${region}:${account}:log-group:/aws/kendra/*'
+                  - region: !Ref 'AWS::Region'
+                    account: !Ref 'AWS::AccountId'
+                Action: 'logs:CreateLogGroup'
+              - Effect: Allow
+                Resource: !Sub
+                  - 'arn:aws:logs:${region}:${account}:log-group:/aws/kendra/*:log-stream:*'
+                  - region: !Ref 'AWS::Region'
+                    account: !Ref 'AWS::AccountId'
+                Action: 
+                  - 'logs:DescribeLogStreams'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+          PolicyName: !Join
+            - ''
+            - - !Ref 'AWS::StackName'
+              - '-KendraIndexPolicy'
+      RoleName: !Join
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-KendraIndexRole'
+      
+  ##Create the Kendra Index
+  KendraIndex:
+    Type: 'AWS::Kendra::Index'
+    Properties:
+      Name: !Join
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-Index'
+      Edition: !Ref KendraEdition
+      RoleArn: !GetAtt KendraIndexRole.Arn
+
+  ##Create the Role needed to crawl and ingest S3 Data Source
+  KendraS3DSRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: kendra.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: !Sub
+                  - 'arn:aws:kendra:${region}:${account}:index/${index}'
+                  - region: !Ref 'AWS::Region'
+                    account: !Ref 'AWS::AccountId'
+                    index: !GetAtt KendraIndex.Id
+                Action:
+                  - 'kendra:BatchPutDocument'
+                  - 'kendra:BatchDeleteDocument'
+          PolicyName: !Join
+            - ''
+            - - !Ref 'AWS::StackName'
+              - '-KendraDSPolicy'
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3DataBucket}'
+                  - !Sub 'arn:aws:s3:::${S3DataBucket}/*'
+          PolicyName: !Join
+            - ''
+            - - !Ref 'AWS::StackName'
+              - '-KendraS3DSPolicy'
+      RoleName: !Join
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-KendraS3DSRole'
+  
+  #Create an S3 Data Source
+  KendraS3DataSource:
+    Type: 'AWS::Kendra::DataSource'
+    Properties:
+      IndexId: !Ref KendraIndex
+      Name: !Sub '${AWS::StackName}-DataSource'
+      Type: 'S3'
+      DataSourceConfiguration:
+        S3Configuration:
+          BucketName: !Ref S3DataBucket
+      RoleArn: !GetAtt KendraS3DSRole.Arn
+
+  #Create a Lambda function that calls Kendra Sync based on events
+  DataSourceSyncLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt 'DataSourceSyncLambdaRole.Arn'
+      Timeout: 900
+      MemorySize: 1024
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import cfnresponse
+
+          indexId = os.environ['INDEX_ID']
+          dsId = os.environ['DS_ID']
+
+          def lambda_handler(event, context):
+            print(json.dumps(event))
+            kendra_client = boto3.client('kendra')
+
+            if 'StackId' in event and 'LogicalResourceId' in event:
+            # Triggered by CloudFormation
+              try:
+                response = kendra_client.start_data_source_sync_job(
+                  Id=dsId,
+                  IndexId=indexId
+                )
+
+                # Notify CloudFormation of a successful operation
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+              except Exception as e:
+                # Handle exceptions and notify CloudFormation of the failure
+                print(f"Error: {e}")
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+            else:
+              # Likely triggered by EventBridge or another source
+              try:
+                  response = kendra_client.start_data_source_sync_job(
+                    Id=dsId,
+                    IndexId=indexId
+                  )
+
+                  # Return a standard success response
+                  return {
+                    'statusCode': 200,
+                    'body': json.dumps(response)
+                  }
+              except Exception as e:
+                print(f"Error: {e}")
+                return {
+                  'statusCode': 500,
+                  'body': 'Failed!'
+                }
+
+      Environment:
+        Variables:
+          INDEX_ID: !GetAtt KendraIndex.Id
+          DS_ID: !GetAtt KendraS3DataSource.Id
+    DependsOn: KendraS3DataSource
+
+
+
+  #Create an IAM role for Lambda function
+  DataSourceSyncLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: KendraSyncPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Resource: '*'
+                Action:
+                  - 'kendra:StartDataSourceSyncJob'
+      RoleName: !Join
+        - ''
+        - - !Ref 'AWS::StackName'
+          - '-DataSourceSyncLambdaRole'
+  
+  #Create an Event bridge rule that calls Lambda based on sync interval specified in the input parameters
+  SyncSchedule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: 'Scheduled rule to sync Kendra data source'
+      ScheduleExpression: !FindInMap [SyncSchedules, !Ref SyncInterval, schedule]
+      Targets:
+        - Arn: !GetAtt DataSourceSyncLambda.Arn
+          Id: 'SyncTarget'
+          Input:
+            Fn::Sub:
+              - '{"sourceId": "${KendraS3DataSourceId}", "indexId": "${KendraIndexId}"}'
+              - KendraS3DataSourceId: !GetAtt KendraS3DataSource.Id
+                KendraIndexId: !GetAtt KendraIndex.Id
+
+  #Create an custom trigger to call Lambda for initial sync after the stack is complete.
+  InitialSyncTrigger:
+    Type: Custom::InitialSync
+    Properties:
+      ServiceToken: !GetAtt DataSourceSyncLambda.Arn
+
+Outputs:
+  KendraIndexID:
+    Description: 'The ID of the created Kendra Index'
+    Value: !Ref KendraIndex
