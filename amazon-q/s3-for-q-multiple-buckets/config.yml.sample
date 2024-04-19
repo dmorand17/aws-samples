@@ -1,0 +1,16 @@
+stack_name: Q3S3Access      # stack name should be 16 characters or less
+LogLevel: INFO              # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# streamlit:
+#   deploy_streamlit: True         # Whether to deploy Streamlit frontend on ECS
+#   open_to_public_internet: True  # Opens the Application Load Balancer to the internet
+
+lambda:
+  architecture: X86_64         # The system architectures compatible with the Lambda functions X86_64 or ARM_64 (to be used when building with a Mac M1 chip)
+  python_runtime: PYTHON_3_11   # Python runtime for Lambda function
+
+s3:
+  buckets:
+    - name: bucket1
+    - name: bucket2
+
