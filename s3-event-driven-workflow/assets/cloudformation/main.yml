@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |-
+  CloudFormation template to demonstrate a step function workflow
+  Once the objects have been scanned, the step function will be invoked
+
+Resources:
+  SourceBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-source-bucket'
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+  DestinationBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-destination-bucket'
+      VersioningConfiguration:
+        Status: Enabled
+
+  StepFunctionsRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: S3Actions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:CopyObject'
+                  - 's3:DeleteObject'
+                  - 's3:GetObjectTagging'
+                Resource: 
+                  - !GetAtt SourceBucket.Arn
+                  - !Join ['', [!GetAtt SourceBucket.Arn, '/*']]
+                  - !GetAtt DestinationBucket.Arn
+                  - !Join ['', [!GetAtt DestinationBucket.Arn, '/*']]
+
+  S3CopyDeleteStateMachine:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      StateMachineName: !Sub '${AWS::StackName}-state-machine'
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub
+        - |-
+          {
+            "Comment": "S3 Copy and Delete Workflow",
+            "StartAt": "CopyS3Object",
+            "States": {
+              "CopyS3Object": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
+                "Parameters": {
+                  "Bucket": "${DestinationBucketName}",
+                  "CopySource.$": "States.Format('{}/{}', $.detail.bucket.name, $.detail.object.key)",
+                  "Key.$": "$.detail.object.key"
+                },
+                "Next": "GetSourceObjectDetails"
+              },
+              "GetSourceObjectDetails": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
+                "Parameters": {
+                  "Bucket.$": "$.detail.bucket.name",
+                  "Key.$": "$.detail.object.key"
+                },
+                "Next": "GetDestinationObjectDetails"
+              },
+              "GetDestinationObjectDetails": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
+                "Parameters": {
+                  "Bucket": "${DestinationBucketName}",
+                  "Key.$": "$.detail.object.key"
+                },
+                "Next": "VerifyMD5Checksum"
+              },
+              "VerifyMD5Checksum": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.ETag",
+                    "StringEquals": "$.Execution.Input.ETag",
+                    "Next": "DeleteSourceObject"
+                  }
+                ],
+                "Default": "CopyFailed"
+              },
+              "DeleteSourceObject": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::aws-sdk:s3:deleteObject",
+                "Parameters": {
+                  "Bucket.$": "$.detail.bucket.name",
+                  "Key.$": "$.detail.object.key"
+                },
+                "End": true
+              },
+              "CopyFailed": {
+                "Type": "Fail",
+                "Cause": "MD5 checksum verification failed",
+                "Error": "ChecksumMismatch"
+              }
+            }
+          }
+        - {DestinationBucketName: !Ref DestinationBucket}
+
+  EventBridgeRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: InvokeStepFunction
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'states:StartExecution'
+                Resource: !Ref S3CopyDeleteStateMachine
+
+  EventBridgeRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: "Rule to trigger Step Function on S3 PutObject with specific tag"
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource: 
+            - "s3.amazonaws.com"
+          eventName:
+            - "PutBucketTagging"
+          requestParameters:
+            bucketName: 
+              - !Ref SourceBucket
+            Tagging:
+              tagSet:
+                Tag: 
+                  - key:
+                    - "ScanResult"
+                    value:
+                    - "CLEAN"
+      State: ENABLED
+      Targets:
+        - Arn: !Ref S3CopyDeleteStateMachine
+          Id: "TriggerStepFunction"
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+Outputs:
+  SourceBucketName:
+    Description: "Name of the source S3 bucket"
+    Value: !Ref SourceBucket
+  DestinationBucketName:
+    Description: "Name of the destination S3 bucket"
+    Value: !Ref DestinationBucket
+  StateMachineArn:
+    Description: "ARN of the Step Functions state machine"
+    Value: !Ref S3CopyDeleteStateMachine
