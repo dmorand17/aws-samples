@@ -72,13 +72,13 @@ The solution uses the following AWS services:
     --tagging "ScanResult=CLEAN"
    ```
 
-Update tags only
+   Update tags only
 
-    ```bash
-    aws s3api put-object-tagging --bucket SOURCE_BUCKET_NAME \
-    --key your-object-key \
-    --tagging 'TagSet=[{Key=ScanResult,Value=CLEAN}]'
-    ```
+   ```bash
+   aws s3api put-object-tagging --bucket SOURCE_BUCKET_NAME \
+   --key your-object-key \
+   --tagging 'TagSet=[{Key=ScanResult,Value=CLEAN}]'
+   ```
 
 2. Check the destination bucket to verify that the file was copied:
 
