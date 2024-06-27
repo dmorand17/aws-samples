@@ -39,9 +39,12 @@ Resources:
               - Effect: Allow
                 Action:
                   - 's3:GetObject'
-                  - 's3:CopyObject'
+                  - 's3:PutObject'
                   - 's3:DeleteObject'
                   - 's3:GetObjectTagging'
+                  - 's3:PutObjectTagging'
+                  - 's3:GetObjectVersionTagging'
+                  - 's3:GetObjectAttributes'
                 Resource: 
                   - !GetAtt SourceBucket.Arn
                   - !Join ['', [!GetAtt SourceBucket.Arn, '/*']]
@@ -57,8 +60,32 @@ Resources:
         - |-
           {
             "Comment": "S3 Copy and Delete Workflow",
-            "StartAt": "CopyS3Object",
+            "StartAt": "GetObjectTagging",
             "States": {
+              "GetObjectTagging": {
+                "Type": "Task",
+                "Parameters": {
+                  "Bucket.$": "$.detail.bucket.name",
+                  "Key.$": "$.detail.object.key"
+                },
+                "Resource": "arn:aws:states:::aws-sdk:s3:getObjectTagging",
+                "Next": "CheckScanResultTag",
+                "ResultSelector": {
+                  "ScanResultTag.$": "$.TagSet[?(@.Key=='ScanResult')]"
+                },
+                "ResultPath": "$.ObjectTags"
+              },
+              "CheckScanResultTag": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.ObjectTags.ScanResultTag[0].Value",
+                  "StringEquals": "CLEAN",
+                  "Next": "CopyS3Object"
+                }
+              ],
+              "Default": "SkipProcessing"
+            },
               "CopyS3Object": {
                 "Type": "Task",
                 "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
@@ -67,32 +94,18 @@ Resources:
                   "CopySource.$": "States.Format('{}/{}', $.detail.bucket.name, $.detail.object.key)",
                   "Key.$": "$.detail.object.key"
                 },
-                "Next": "GetSourceObjectDetails"
-              },
-              "GetSourceObjectDetails": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
-                "Parameters": {
-                  "Bucket.$": "$.detail.bucket.name",
-                  "Key.$": "$.detail.object.key"
-                },
-                "Next": "GetDestinationObjectDetails"
-              },
-              "GetDestinationObjectDetails": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
-                "Parameters": {
-                  "Bucket": "${DestinationBucketName}",
-                  "Key.$": "$.detail.object.key"
-                },
-                "Next": "VerifyMD5Checksum"
+                "Next": "VerifyMD5Checksum",
+                "ResultPath": "$.CopyS3Object",
+                "ResultSelector": {
+                  "Etag.$": "States.StringToJson($.CopyObjectResult.ETag)"
+                }                
               },
               "VerifyMD5Checksum": {
                 "Type": "Choice",
                 "Choices": [
                   {
-                    "Variable": "$.ETag",
-                    "StringEquals": "$.Execution.Input.ETag",
+                    "Variable": "$.detail.object.etag",
+                    "StringEqualsPath": "$.CopyS3Object.Etag",
                     "Next": "DeleteSourceObject"
                   }
                 ],
@@ -111,7 +124,10 @@ Resources:
                 "Type": "Fail",
                 "Cause": "MD5 checksum verification failed",
                 "Error": "ChecksumMismatch"
-              }
+              },
+              "SkipProcessing": {
+                "Type": "Succeed"
+              }              
             }
           }
         - {DestinationBucketName: !Ref DestinationBucket}
@@ -138,27 +154,16 @@ Resources:
   EventBridgeRule:
     Type: 'AWS::Events::Rule'
     Properties:
-      Description: "Rule to trigger Step Function on S3 PutObject with specific tag"
+      Description: "Rule to trigger Step Function when Object Tags are added to S3 Object"
       EventPattern:
         source:
           - aws.s3
         detail-type:
-          - "AWS API Call via CloudTrail"
+          - "Object Tags Added"
         detail:
-          eventSource: 
-            - "s3.amazonaws.com"
-          eventName:
-            - "PutBucketTagging"
-          requestParameters:
-            bucketName: 
+          bucket:
+            name:
               - !Ref SourceBucket
-            Tagging:
-              tagSet:
-                Tag: 
-                  - key:
-                    - "ScanResult"
-                    value:
-                    - "CLEAN"
       State: ENABLED
       Targets:
         - Arn: !Ref S3CopyDeleteStateMachine

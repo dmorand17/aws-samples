@@ -1,0 +1,28 @@
+##########
+  CLEAN
+##########
+
+# Copy object
+aws s3api put-object --bucket SOURCE_BUCKET_NAME \
+    --key file_1MB.dat \
+    --body ./tmp/file_1MB.dat
+
+# Tag resource CLEAN
+aws s3api put-object-tagging --bucket $SOURCE_BUCKET_NAME \
+    --key file_1MB.dat \
+    --tagging 'TagSet=[{Key=ScanResult,Value=CLEAN}]'
+
+
+#############
+  INFECTED
+#############
+
+# Copy object
+aws s3api put-object --bucket SOURCE_BUCKET_NAME \
+    --key file_1MB-infected.dat \
+    --body ./tmp/file_1MB.dat
+
+# Tag resource CLEAN
+aws s3api put-object-tagging --bucket $SOURCE_BUCKET_NAME \
+    --key file_1MB-infected.dat \
+    --tagging 'TagSet=[{Key=ScanResult,Value=INFECTED}]'
