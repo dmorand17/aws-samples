@@ -33,6 +33,8 @@ The solution uses the following AWS services:
 - ⚡ Amazon EventBridge
 - 🔐 AWS IAM
 
+![alt text](images/image.png)
+
 ## 📝 Prerequisites
 
 - An AWS account
@@ -68,11 +70,10 @@ The solution uses the following AWS services:
    ```bash
    aws s3api put-object --bucket SOURCE_BUCKET_NAME \
     --key test-file.txt \
-    --body ./test-file.txt \
-    --tagging "ScanResult=CLEAN"
+    --body ./test-file.txt
    ```
 
-   Update tags only
+   Update tags
 
    ```bash
    aws s3api put-object-tagging --bucket SOURCE_BUCKET_NAME \
