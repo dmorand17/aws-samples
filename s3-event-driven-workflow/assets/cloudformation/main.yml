@@ -21,6 +21,20 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
+  IngestionMappingTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Sub '${AWS::StackName}-ingestion-mapping'
+      AttributeDefinitions:
+        - AttributeName: lab
+          AttributeType: S
+      KeySchema:
+        - AttributeName: lab
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
   StepFunctionsRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -32,7 +46,7 @@ Resources:
               Service: states.amazonaws.com
             Action: 'sts:AssumeRole'
       Policies:
-        - PolicyName: S3Actions
+        - PolicyName: StepFunctionPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -50,6 +64,11 @@ Resources:
                   - !Join ['', [!GetAtt SourceBucket.Arn, '/*']]
                   - !GetAtt DestinationBucket.Arn
                   - !Join ['', [!GetAtt DestinationBucket.Arn, '/*']]
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:GetItem'
+                Resource: 
+                  - !GetAtt IngestionMappingTable.Arn
 
   S3CopyDeleteStateMachine:
     Type: 'AWS::StepFunctions::StateMachine'
@@ -81,16 +100,50 @@ Resources:
                 {
                   "Variable": "$.ObjectTags.ScanResultTag[0].Value",
                   "StringEquals": "CLEAN",
-                  "Next": "CopyS3Object"
+                  "Next": "GetPrefix"
                 }
               ],
               "Default": "SkipProcessing"
+              },
+            "GetPrefix": {
+              "Type": "Pass",
+              "Next": "GetLabDestinationBucket",
+              "ResultPath": "$.extracted",
+                    "Parameters": {
+                      "fullKey.$": "$.detail.object.key",
+                      "splitKey.$": "States.StringSplit($.detail.object.key, '/')",
+                      "prefix.$": "States.ArrayGetItem(States.StringSplit($.detail.object.key, '/'), 0)"
+                }            
             },
+            "GetLabDestinationBucket": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::dynamodb:getItem",
+              "Parameters": {
+                "TableName": "${IngestionMappingTable}",
+                "Key": {
+                  "lab": {
+                    "S.$": "$.extracted.prefix"
+                  }
+                }
+              },
+              "Next": "CopyS3Object",
+              "ResultPath": "$.DestinationBucket",
+                "ResultSelector": {
+                  "Item.$": "$.Item"
+                },
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CopyFailed"
+                }]
+              },                                    
               "CopyS3Object": {
                 "Type": "Task",
                 "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
                 "Parameters": {
-                  "Bucket": "${DestinationBucketName}",
+                  "Bucket.$": "$.DestinationBucket.Item.s3BucketName.S",
                   "CopySource.$": "States.Format('{}/{}', $.detail.bucket.name, $.detail.object.key)",
                   "Key.$": "$.detail.object.key"
                 },
@@ -164,6 +217,9 @@ Resources:
           bucket:
             name:
               - !Ref SourceBucket
+          object:
+            key:
+              - wildcard: "*/import/*"
       State: ENABLED
       Targets:
         - Arn: !Ref S3CopyDeleteStateMachine
