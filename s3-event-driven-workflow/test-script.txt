@@ -28,3 +28,17 @@ aws s3api put-object --bucket $SOURCE_BUCKET_NAME \
 aws s3api put-object-tagging --bucket $SOURCE_BUCKET_NAME \
     --key lab1/import/file_1MB-infected.dat \
     --tagging 'TagSet=[{Key=ScanResult,Value=INFECTED}]'
+
+################
+Using Checksum
+################
+
+SOURCE_BUCKET_NAME=clean-file-transfer-source-bucket
+aws s3api put-object --bucket $SOURCE_BUCKET_NAME \
+--key lab1/import/file_101MB.dat \
+--body tmp/file_101MB.dat \
+--checksum-algorithm SHA256
+
+aws s3api put-object-tagging --bucket $SOURCE_BUCKET_NAME \
+    --key lab1/import/file_101MB.dat \
+    --tagging 'TagSet=[{Key=ScanResult,Value=CLEAN}]'

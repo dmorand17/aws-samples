@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # Create a set of files from 1MB to 1GB
-MAX_FILE_SIZE=1024
-FILE_SIZE_INCREMENT=150
+MAX_FILE_SIZE=500
+FILE_SIZE_INCREMENT=50
 OUTPUT_DIR="tmp"
 
 # Check if the output directory exists

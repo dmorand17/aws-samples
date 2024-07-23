@@ -4,10 +4,49 @@ Description: |-
   Once the objects have been scanned, the step function will be invoked
 
 Resources:
+
+  # Create 2 KMS keys one for the source bucket and one for destination bucket
+  KmsKeySourceBucket:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: 'KMS Key for Source Bucket'
+      Enabled: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: 'key-default-1'
+        Statement:
+          - Sid: 'Enable IAM User Permissions'
+            Effect: 'Allow'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  KmsKeyDestinationBucket:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: 'KMS Key for Destination Bucket'
+      Enabled: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: 'key-default-1'
+        Statement:
+          - Sid: 'Enable IAM User Permissions'
+            Effect: 'Allow'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
   SourceBucket:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Sub '${AWS::StackName}-source-bucket'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !GetAtt KmsKeySourceBucket.Arn
+              SSEAlgorithm: aws:kms
       VersioningConfiguration:
         Status: Enabled
       NotificationConfiguration:
@@ -18,6 +57,11 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Sub '${AWS::StackName}-destination-bucket'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !GetAtt KmsKeyDestinationBucket.Arn
+              SSEAlgorithm: aws:kms
       VersioningConfiguration:
         Status: Enabled
 
@@ -69,6 +113,13 @@ Resources:
                   - 'dynamodb:GetItem'
                 Resource: 
                   - !GetAtt IngestionMappingTable.Arn
+              - Effect: Allow
+                Action:
+                  - 'kms:Decrypt'
+                  - 'kms:GenerateDataKey'
+                Resource: 
+                  - !GetAtt KmsKeySourceBucket.Arn
+                  - !GetAtt KmsKeyDestinationBucket.Arn
 
   S3CopyDeleteStateMachine:
     Type: 'AWS::StepFunctions::StateMachine'
@@ -126,7 +177,7 @@ Resources:
                   }
                 }
               },
-              "Next": "CopyS3Object",
+              "Next": "GetObjectAttributes",
               "ResultPath": "$.DestinationBucket",
                 "ResultSelector": {
                   "Item.$": "$.Item"
@@ -138,32 +189,56 @@ Resources:
                   ],
                   "Next": "CopyFailed"
                 }]
-              },                                    
+              },
+              "GetObjectAttributes": {
+                "Type": "Task",
+                "Parameters": {
+                  "Bucket.$": "$.detail.bucket.name",
+                  "Key.$": "$.detail.object.key",
+                  "ObjectAttributes": [
+                    "Checksum"
+                  ]
+                },
+                "Resource": "arn:aws:states:::aws-sdk:s3:getObjectAttributes",
+                "Next": "CopyS3Object",
+                "ResultPath": "$.SourceObjectAttributes"
+              },              
               "CopyS3Object": {
                 "Type": "Task",
                 "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
                 "Parameters": {
                   "Bucket.$": "$.DestinationBucket.Item.s3BucketName.S",
                   "CopySource.$": "States.Format('{}/{}', $.detail.bucket.name, $.detail.object.key)",
+                  "ChecksumAlgorithm": "SHA256",
                   "Key.$": "$.detail.object.key"
                 },
                 "Next": "VerifyMD5Checksum",
-                "ResultPath": "$.CopyS3Object",
+                "ResultPath": "$.DestinationObject",
                 "ResultSelector": {
-                  "Etag.$": "States.StringToJson($.CopyObjectResult.ETag)"
+                  "Etag.$": "States.StringToJson($.CopyObjectResult.ETag)",
+                  "Checksum.$": "$.CopyObjectResult.ChecksumSHA256"
                 }                
               },
               "VerifyMD5Checksum": {
                 "Type": "Choice",
                 "Choices": [
                   {
-                    "Variable": "$.detail.object.etag",
-                    "StringEqualsPath": "$.CopyS3Object.Etag",
+                    "Variable": "$.DestinationObject.Checksum",
+                    "StringEqualsPath": "$.SourceObjectAttributes.Checksum.ChecksumSHA256",
                     "Next": "DeleteSourceObject"
                   }
                 ],
-                "Default": "CopyFailed"
+                "Default": "DeleteDestinationObject"
               },
+              "DeleteDestinationObject": {
+                "Type": "Task",
+                "Parameters": {
+                  "Bucket.$": "$.DestinationBucket.Item.s3BucketName.S",
+                  "Key.$": "$.detail.object.key"
+                },
+                "Resource": "arn:aws:states:::aws-sdk:s3:deleteObject",
+                "Next": "CopyFailed"
+              },              
               "DeleteSourceObject": {
                 "Type": "Task",
                 "Resource": "arn:aws:states:::aws-sdk:s3:deleteObject",

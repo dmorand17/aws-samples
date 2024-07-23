@@ -65,7 +65,11 @@ The solution uses the following AWS services:
 
 ## 🧪 Testing
 
-1. Upload a file to the source S3 bucket with the tag `ScanResult=CLEAN`:
+1. Update DynamoDB table to add `lab` mapping
+   1. add attribute: `string`
+   2. name: `s3BucketName`
+   3. value: `s3 bucket`
+2. Upload a file to the source S3 bucket with the tag `ScanResult=CLEAN`:
 
    ```bash
    aws s3api put-object --bucket SOURCE_BUCKET_NAME \
@@ -81,13 +85,13 @@ The solution uses the following AWS services:
    --tagging 'TagSet=[{Key=ScanResult,Value=CLEAN}]'
    ```
 
-2. Check the destination bucket to verify that the file was copied:
+3. Check the destination bucket to verify that the file was copied:
 
    ```bash
    aws s3 ls s3://DESTINATION_BUCKET_NAME
    ```
 
-3. Verify that the original file was deleted from the source bucket:
+4. Verify that the original file was deleted from the source bucket:
    ```bash
    aws s3 ls s3://SOURCE_BUCKET_NAME
    ```
