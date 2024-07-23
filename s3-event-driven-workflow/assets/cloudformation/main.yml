@@ -146,85 +146,135 @@ Resources:
                 "ResultPath": "$.ObjectTags"
               },
               "CheckScanResultTag": {
-              "Type": "Choice",
-              "Choices": [
-                {
-                  "Variable": "$.ObjectTags.ScanResultTag[0].Value",
-                  "StringEquals": "CLEAN",
-                  "Next": "GetPrefix"
-                }
-              ],
-              "Default": "SkipProcessing"
-              },
-            "GetPrefix": {
-              "Type": "Pass",
-              "Next": "GetLabDestinationBucket",
-              "ResultPath": "$.extracted",
-                    "Parameters": {
-                      "fullKey.$": "$.detail.object.key",
-                      "splitKey.$": "States.StringSplit($.detail.object.key, '/')",
-                      "prefix.$": "States.ArrayGetItem(States.StringSplit($.detail.object.key, '/'), 0)"
-                }            
-            },
-            "GetLabDestinationBucket": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::dynamodb:getItem",
-              "Parameters": {
-                "TableName": "${IngestionMappingTable}",
-                "Key": {
-                  "lab": {
-                    "S.$": "$.extracted.prefix"
-                  }
-                }
-              },
-              "Next": "GetObjectAttributes",
-              "ResultPath": "$.DestinationBucket",
-                "ResultSelector": {
-                  "Item.$": "$.Item"
-                },
-              "Catch": [
-                {
-                  "ErrorEquals": [
-                    "States.ALL"
-                  ],
-                  "Next": "CopyFailed"
-                }]
-              },
-              "GetObjectAttributes": {
-                "Type": "Task",
-                "Parameters": {
-                  "Bucket.$": "$.detail.bucket.name",
-                  "Key.$": "$.detail.object.key",
-                  "ObjectAttributes": [
-                    "Checksum"
-                  ]
-                },
-                "Resource": "arn:aws:states:::aws-sdk:s3:getObjectAttributes",
-                "Next": "CopyS3Object",
-                "ResultPath": "$.SourceObjectAttributes"
-              },              
-              "CopyS3Object": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
-                "Parameters": {
-                  "Bucket.$": "$.DestinationBucket.Item.s3BucketName.S",
-                  "CopySource.$": "States.Format('{}/{}', $.detail.bucket.name, $.detail.object.key)",
-                  "ChecksumAlgorithm": "SHA256",
-                  "Key.$": "$.detail.object.key"
-                },
-                "Next": "VerifyMD5Checksum",
-                "ResultPath": "$.DestinationObject",
-                "ResultSelector": {
-                  "Etag.$": "States.StringToJson($.CopyObjectResult.ETag)",
-                  "Checksum.$": "$.CopyObjectResult.ChecksumSHA256"
-                }                
-              },
-              "VerifyMD5Checksum": {
                 "Type": "Choice",
                 "Choices": [
                   {
-                    "Variable": "$.DestinationObject.Checksum",
-                    "StringEqualsPath": "$.SourceObjectAttributes.Checksum.ChecksumSHA256",
+                    "Variable": "$.ObjectTags.ScanResultTag[0].Value",
+                    "StringEquals": "CLEAN",
+                    "Next": "GetPrefix"
+                  }
+                ],
+                "Default": "SkipProcessing"
+              },
+              "GetPrefix": {
+                "Type": "Pass",
+                "Next": "Parallel",
+                "ResultPath": "$.extracted",
+                "Parameters": {
+                  "fullKey.$": "$.detail.object.key",
+                  "splitKey.$": "States.StringSplit($.detail.object.key, '/')",
+                  "prefix.$": "States.ArrayGetItem(States.StringSplit($.detail.object.key, '/'), 0)"
+                }
+              },
+              "Parallel": {
+                "Type": "Parallel",
+                "Next": "VerifyChecksum",
+                "Branches": [
+                  {
+                    "StartAt": "GetLabDestinationBucket",
+                    "States": {
+                      "GetLabDestinationBucket": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::dynamodb:getItem",
+                        "Parameters": {
+                          "TableName": "${IngestionMappingTable}",
+                          "Key": {
+                            "lab": {
+                              "S.$": "$.extracted.prefix"
+                            }
+                          }
+                        },
+                        "ResultPath": "$.DestinationBucket",
+                        "ResultSelector": {
+                          "Item.$": "$.Item"
+                        },
+                        "Next": "GetObjectAttributes"
+                      },
+                      "GetObjectAttributes": {
+                        "Type": "Task",
+                        "Parameters": {
+                          "Bucket.$": "$.detail.bucket.name",
+                          "Key.$": "$.detail.object.key",
+                          "ObjectAttributes": [
+                            "Checksum"
+                          ]
+                        },
+                        "Resource": "arn:aws:states:::aws-sdk:s3:getObjectAttributes",
+                        "ResultPath": "$.SourceObjectAttributes",
+                        "Next": "Checksum exists"
+                      },
+                      "Checksum exists": {
+                        "Type": "Choice",
+                        "Choices": [
+                          {
+                            "Variable": "$.SourceObjectAttributes.Checksum.ChecksumSHA256",
+                            "IsPresent": true,
+                            "Next": "CopyS3Object"
+                          }
+                        ],
+                        "Default": "Fail"
+                      },
+                      "Fail": {
+                        "Type": "Fail",
+                        "Cause": "Unable to find a Checksum on source object"
+                      },
+                      "CopyS3Object": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
+                        "Parameters": {
+                          "Bucket.$": "$.DestinationBucket.Item.s3BucketName.S",
+                          "CopySource.$": "States.Format('{}/{}', $.detail.bucket.name, $.detail.object.key)",
+                          "ChecksumAlgorithm": "SHA256",
+                          "Key.$": "$.detail.object.key"
+                        },
+                        "ResultPath": "$.DestinationObject",
+                        "ResultSelector": {
+                          "Etag.$": "States.StringToJson($.CopyObjectResult.ETag)",
+                          "Checksum.$": "$.CopyObjectResult.ChecksumSHA256"
+                        },
+                        "End": true
+                      }
+                    }
+                  }
+                ],
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "States.Timeout"
+                    ],
+                    "BackoffRate": 5,
+                    "IntervalSeconds": 5,
+                    "MaxAttempts": 3,
+                    "Comment": "Timeout Handling"
+                  }
+                ],
+                "Catch": [
+                  {
+                    "ErrorEquals": [
+                      "States.ALL"
+                    ],
+                    "Next": "CopyFailed"
+                  }
+                ],
+                "ResultSelector": {
+                  "source-object": {
+                    "bucket-name.$": "$.[0].detail.bucket.name",
+                    "key.$": "$.[0].detail.object.key",
+                    "Checksum.$": "$.[0].SourceObjectAttributes.Checksum.ChecksumSHA256"
+                  },
+                  "target-object": {
+                    "bucket-name.$": "$.[0].DestinationBucket.Item.s3BucketName.S",
+                    "key.$": "$.[0].detail.object.key",
+                    "Checksum.$": "$.[0].DestinationObject.Checksum"
+                  }
+                }
+              },
+              "VerifyChecksum": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.source-object.Checksum",
+                    "StringEqualsPath": "$.target-object.Checksum",
                     "Next": "DeleteSourceObject"
                   }
                 ],
@@ -233,29 +283,29 @@ Resources:
               "DeleteDestinationObject": {
                 "Type": "Task",
                 "Parameters": {
-                  "Bucket.$": "$.DestinationBucket.Item.s3BucketName.S",
-                  "Key.$": "$.detail.object.key"
+                  "Bucket.$": "$.target-object.bucket-name",
+                  "Key.$": "$.target-object.key"
                 },
                 "Resource": "arn:aws:states:::aws-sdk:s3:deleteObject",
                 "Next": "CopyFailed"
-              },              
+              },
               "DeleteSourceObject": {
                 "Type": "Task",
                 "Resource": "arn:aws:states:::aws-sdk:s3:deleteObject",
                 "Parameters": {
-                  "Bucket.$": "$.detail.bucket.name",
-                  "Key.$": "$.detail.object.key"
+                  "Bucket.$": "$.source-object.bucket-name",
+                  "Key.$": "$.source-object.key"
                 },
                 "End": true
               },
               "CopyFailed": {
                 "Type": "Fail",
-                "Cause": "MD5 checksum verification failed",
+                "Cause": "Checksum verification failed",
                 "Error": "ChecksumMismatch"
               },
               "SkipProcessing": {
                 "Type": "Succeed"
-              }              
+              }
             }
           }
         - {DestinationBucketName: !Ref DestinationBucket}
