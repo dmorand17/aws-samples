@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for AWS DataSync S3 buckets and IAM role'
+
+Parameters:
+  SourceBucketName:
+    Type: String
+    Description: Name for the source S3 bucket
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+    ConstraintDescription: Bucket names can only contain lowercase letters, numbers, dots (.), and hyphens (-).
+  
+  DestBucketName:
+    Type: String
+    Description: Name for the destination S3 bucket
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+    ConstraintDescription: Bucket names can only contain lowercase letters, numbers, dots (.), and hyphens (-).
+
+Resources:
+  SourceBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref SourceBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  DestinationBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref DestBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  DataSyncRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: datasync.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSDataSyncFullAccess
+      Policies:
+        - PolicyName: S3BucketsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                Resource:
+                  - !GetAtt SourceBucket.Arn
+                  - !GetAtt DestinationBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:DeleteObject
+                  - s3:GetObject
+                  - s3:ListMultipartUploadParts
+                  - s3:PutObject
+                  - s3:GetObjectAttributes
+                Resource:
+                  - !Sub '${SourceBucket.Arn}/*'
+                  - !Sub '${DestinationBucket.Arn}/*'
+
+Outputs:
+  SourceBucketName:
+    Description: Name of the source S3 bucket
+    Value: !Ref SourceBucket
+
+  SourceBucketArn:
+    Description: ARN of the source S3 bucket
+    Value: !GetAtt SourceBucket.Arn
+
+  DestinationBucketName:
+    Description: Name of the destination S3 bucket
+    Value: !Ref DestinationBucket
+
+  DestinationBucketArn:
+    Description: ARN of the destination S3 bucket
+    Value: !GetAtt DestinationBucket.Arn
+
+  DataSyncRoleArn:
+    Description: ARN of the IAM role for DataSync
+    Value: !GetAtt DataSyncRole.Arn
