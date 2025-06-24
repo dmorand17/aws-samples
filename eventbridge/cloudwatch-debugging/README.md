@@ -29,30 +29,30 @@ aws s3api put-bucket-versioning \
 
 ## Backend Configuration
 
-Create a `backend.tf` file with the following configuration:
+This project uses environment-specific backend configurations. Create a `backend.config` file in your environment directory (e.g., `envs/your-environment/backend.config`) with the following configuration:
 
 ```hcl
-terraform {
-  backend "s3" {
-    bucket         = "your-terraform-state-bucket"
-    key            = "terraform.tfstate"
-    region         = "your-region"
-    encrypt        = true
-    use_lock_file  = true
-  }
-}
+bucket       = "your-terraform-state-bucket"
+region       = "your-region"
+key          = "eventbridge-cloudwatch-debugging/terraform.tfstate"
+encrypt      = true
+use_lockfile = true
 ```
+
+You can use the provided `sample-backend.config` file as a template and customize it for your environment.
 
 ## Usage
 
-1. Initialize Terraform:
+1. Initialize Terraform with your environment-specific backend configuration:
 
 ```bash
-terraform init
+terraform init -backend-config=./envs/your-environment/backend.config
+```
 
-# OR
+For example:
 
-terraform init  -backend-config=./backend.config
+```bash
+terraform init -backend-config=./envs/your-environment/backend.config
 ```
 
 2. Plan your changes:

@@ -15,3 +15,9 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+variable "log_retention_days" {
+  description = "Log retention days"
+  type        = number
+  default     = 3
+}

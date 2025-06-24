@@ -26,11 +26,6 @@ terraform {
 # Get current AWS account ID
 data "aws_caller_identity" "current" {}
 
-module "tf-state" {
-  source      = "./modules/tf-state"
-  bucket_name = "cc-tf-state-backend-ci-cd"
-}
-
 # Create an EventBridge rule
 resource "aws_cloudwatch_event_rule" "all_events" {
   name        = "capture-all-events"
