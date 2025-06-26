@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EventBridge rule for SageMaker Canvas events with Lambda trigger'
+
+Resources:
+  # Lambda Function
+  EventHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-event-handler'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          def lambda_handler(event, context):
+              logger.info("Event received:")
+              logger.info(json.dumps(event, indent=2, default=str))
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Event processed successfully')
+              }
+      Timeout: 30
+      MemorySize: 128
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-lambda-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # EventBridge Rule
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-sagemaker-canvas-events'
+      Description: 'EventBridge rule for SageMaker Canvas events and other non-excluded events'
+      EventPattern:
+        $or:
+          - source:
+              - aws.sagemaker
+            detail-type:
+              - AWS API Call via CloudTrail
+            detail:
+              eventSource:
+                - sagemaker.amazonaws.com
+              eventName:
+                - CreateApp
+                - DeleteApp
+          - detail-type:
+              - anything-but: AWS API Call via CloudTrail
+            source:
+              - anything-but:
+                  - aws.config
+                  - aws.cloudtrail
+                  - aws.ssm
+                  - aws.tag
+            account:
+              - !Sub '${AWS::AccountId}'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt EventHandlerFunction.Arn
+          Id: EventHandlerTarget
+
+  # Permission for EventBridge to invoke Lambda
+  EventBridgeInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EventHandlerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventBridgeRule.Arn
+
+Outputs:
+  EventBridgeRuleArn:
+    Description: 'ARN of the EventBridge rule'
+    Value: !GetAtt EventBridgeRule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EventBridgeRuleArn'
+
+  LambdaFunctionArn:
+    Description: 'ARN of the Lambda function'
+    Value: !GetAtt EventHandlerFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+
+  LambdaFunctionName:
+    Description: 'Name of the Lambda function'
+    Value: !Ref EventHandlerFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName' 

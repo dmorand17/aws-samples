@@ -1,0 +1,23 @@
+# Create a CloudFormation Template that creates an IAM Role / Policy that allows access to the managed roles
+# ResourceGroupsTaggingAPITagUntagSupportedResources
+# ResourceGroupsandTagEditorFullAccess
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Resources:
+  GroupTaggedResourceGroupsIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: GroupTaggedResourceGroupsIAMRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'resource-groups.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/ResourceGroupsandTagEditorFullAccess'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/ResourceGroupsTaggingAPITagUntagSupportedResources'

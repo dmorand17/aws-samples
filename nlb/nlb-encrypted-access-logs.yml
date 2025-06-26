@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NLB with access logging to S3 bucket using customer-managed KMS key"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcId
+          - SubnetIds
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the NLB will be deployed
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of subnet IDs for the NLB (minimum 2 for HA)
+
+# Mapping for ELB service account IDs by region
+Mappings:
+  RegionMap:
+    us-east-1:
+      ELBAccountId: "127311923021"
+    us-east-2:
+      ELBAccountId: "033677994240"
+    us-west-1:
+      ELBAccountId: "027434742980"
+    us-west-2:
+      ELBAccountId: "797873946194"
+    eu-west-1:
+      ELBAccountId: "156460612806"
+    eu-central-1:
+      ELBAccountId: "054676820928"
+    ap-southeast-1:
+      ELBAccountId: "114774131450"
+    ap-northeast-1:
+      ELBAccountId: "582318560864"
+
+Resources:
+  # Customer-managed KMS key for S3 encryption
+  S3EncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "KMS key for NLB access logs S3 bucket encryption"
+      KeyPolicy:
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: Allow ELB service to use the key
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - kms:DescribeKey
+            Resource: "*"
+
+  # KMS key alias
+  S3EncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/nlb-access-logs-key
+      TargetKeyId: !Ref S3EncryptionKey
+
+  # S3 bucket for access logs
+  AccessLogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-nlb-access-logs-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt S3EncryptionKey.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 90
+
+  # S3 bucket policy to allow NLB to write logs
+  AccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AWSLogDeliveryAclCheck
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !Sub "arn:${AWS::Partition}:s3:::${AccessLogsBucket}"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub "${AWS::AccountId}"
+          - Sid: AWSLogDeliveryWriteNLB
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "arn:${AWS::Partition}:s3:::${AccessLogsBucket}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceAccount: !Sub "${AWS::AccountId}"
+
+  # Network Load Balancer
+  NetworkLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${AWS::StackName}-nlb"
+      Type: network
+      Scheme: internet-facing
+      Subnets: !Ref SubnetIds
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: "true"
+        - Key: access_logs.s3.bucket
+          Value: !Ref AccessLogsBucket
+        - Key: access_logs.s3.prefix
+          Value: "nlb-access-logs"
+        - Key: deletion_protection.enabled
+          Value: "false"
+
+  # Target Group (example)
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-tg"
+      Port: 80
+      Protocol: TCP
+      VpcId: !Ref VpcId
+      HealthCheckProtocol: TCP
+      HealthCheckPort: 80
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  # Listener (example)
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref NetworkLoadBalancer
+      Port: 80
+      Protocol: TCP
+
+Outputs:
+  LoadBalancerArn:
+    Description: "ARN of the Network Load Balancer"
+    Value: !Ref NetworkLoadBalancer
+    Export:
+      Name: !Sub "${AWS::StackName}-NLB-ARN"
+
+  LoadBalancerDNSName:
+    Description: "DNS name of the Network Load Balancer"
+    Value: !GetAtt NetworkLoadBalancer.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-NLB-DNS"
+
+  S3BucketName:
+    Description: "Name of the S3 bucket for access logs"
+    Value: !Ref AccessLogsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-AccessLogs-Bucket"
+
+  KMSKeyId:
+    Description: "KMS Key ID for S3 encryption"
+    Value: !Ref S3EncryptionKey
+    Export:
+      Name: !Sub "${AWS::StackName}-KMS-Key"
