@@ -21,3 +21,9 @@ variable "log_retention_days" {
   type        = number
   default     = 3
 }
+
+variable "log_group_name" {
+  description = "Log group name"
+  type        = string
+  default     = "eventbridge-logs"
+}

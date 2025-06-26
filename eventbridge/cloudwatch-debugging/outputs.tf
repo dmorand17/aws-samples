@@ -8,3 +8,7 @@ output "eventbridge_rule_arn" {
 output "cloudwatch_log_group_arn" {
   value = aws_cloudwatch_log_group.events_log_group.arn
 }
+
+output "backend_config" {
+  value = module.terraform_state.backend_config
+}

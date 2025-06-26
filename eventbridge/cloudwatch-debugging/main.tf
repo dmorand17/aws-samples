@@ -21,10 +21,23 @@ terraform {
 
   # This sets the version constraint to a minimum of 1.10 for native state file locking support
   required_version = "~> 1.10"
+
+  backend "s3" {}
 }
 
 # Get current AWS account ID
 data "aws_caller_identity" "current" {}
+
+module "terraform_state" {
+  source = "github.com/dmorand17/terraform-aws-tfstate"
+
+  bucket_name = "tfstate"
+  key_prefix  = "eventbridge-cloudwatch-debugging"
+  tags = {
+    Environment = "Dev"
+    Project     = "CloudWatch Debugging"
+  }
+}
 
 # Create an EventBridge rule
 resource "aws_cloudwatch_event_rule" "all_events" {
@@ -39,8 +52,8 @@ resource "aws_cloudwatch_event_rule" "all_events" {
 
 # Create a CloudWatch log group
 resource "aws_cloudwatch_log_group" "events_log_group" {
-  name              = "/aws/events/eventbridge-logs"
-  retention_in_days = 7 # Adjust retention period as needed
+  name              = "/aws/events/${var.log_group_name}"
+  retention_in_days = var.log_retention_days
 }
 
 # Create an IAM role for EventBridge
