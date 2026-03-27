@@ -1,6 +1,6 @@
 # Spot Instance Placement Scores
 
-Query the EC2 [Spot Placement Score](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-placement-score.html) API to find the best availability zones for launching Spot instances. Automatically discovers compute-optimized x86_64 instance types matching a vCPU range, then shows the top N best-scored types per AZ.
+Tools for querying the EC2 [Spot Placement Score](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-placement-score.html) API to find the best availability zones for launching Spot instances.
 
 ## Prerequisites
 
@@ -8,100 +8,122 @@ Query the EC2 [Spot Placement Score](https://docs.aws.amazon.com/AWSEC2/latest/U
 - `jq`
 - IAM permissions: `ec2:GetSpotPlacementScores`, `ec2:DescribeInstanceTypes`
 
-## Usage
+## Project Structure
+
+```
+scripts/
+  get-spot-scores.sh             # Scores using a cli-input-yaml config file
+  list-instance-types.sh         # Lists instance types filtered by vCPU/memory range
+  request-spot-fleet.sh          # Requests a Spot Fleet (legacy API)
+configs/
+  spot-scores-by-type.yaml       # Config: score specific instance types
+  spot-scores-by-attributes.yaml # Config: score by instance attributes
+  get-spot-placement-scores-skeleton.yaml  # Full API input skeleton reference
+```
+
+## Scripts
+
+### get-spot-scores.sh
+
+Queries the Spot Placement Score API using a `--cli-input-yaml` config file. Works with both instance-type-based and attribute-based configs.
 
 ```bash
-./get-spot-placement-scores.sh [options]
+./scripts/get-spot-scores.sh <config.yaml> [-n TOP] [-a AZ,...]
 ```
 
-### Options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-t, --target-capacity NUM` | Target number of instances | `1` |
-| `-u, --capacity-unit TYPE` | Capacity unit: `units`, `vcpu`, or `memory-mib` | `units` |
-| `-r, --regions REGION,...` | Comma-separated list of regions to score | all regions |
-| `-c, --vcpu-min NUM` | Minimum vCPUs | `72` |
-| `-C, --vcpu-max NUM` | Maximum vCPUs | `96` |
-| `-n, --top NUM` | Top N instance types per AZ | `3` |
-| `-a, --az AZ,...` | Comma-separated AZ IDs to filter output | all AZs |
-| `-h, --help` | Show help | |
-
-### Examples
+| Flag              | Description                              | Default |
+| ----------------- | ---------------------------------------- | ------- |
+| `config.yaml`     | Path to cli-input-yaml config (required) |         |
+| `-n, --top NUM`   | Top N results per AZ                     | `3`     |
+| `-a, --az AZ,...` | Filter to specific AZ IDs                | all     |
 
 ```bash
-# Default: top 3 types per AZ for 72-96 vCPU compute instances
-./get-spot-placement-scores.sh
+# Score by explicit instance types
+./scripts/get-spot-scores.sh configs/spot-scores-by-type.yaml
 
-# Score specific regions with a higher capacity target
-./get-spot-placement-scores.sh -t 10 -r us-east-1,us-west-2,eu-west-1
-
-# Custom vCPU range, top 5 per AZ
-./get-spot-placement-scores.sh -c 48 -C 64 -n 5 -r us-east-1
-
-# Filter to specific AZs
-./get-spot-placement-scores.sh -r us-east-1 -a use1-az1,use1-az2
+# Score by instance attributes, top 5
+./scripts/get-spot-scores.sh configs/spot-scores-by-attributes.yaml -n 5
 ```
 
-### Output
+### list-instance-types.sh
 
-Shows the top N instance types per AZ, sorted by Region → AZ → Score:
+Lists EC2 instance types with vCPU and memory details, filtered by range parameters.
 
-```
-Score: 9  |  Type: c6a.24xlarge   |  Region: us-east-1  |  AZ: use1-az1
-Score: 8  |  Type: c7i.24xlarge   |  Region: us-east-1  |  AZ: use1-az1
-Score: 8  |  Type: c5a.24xlarge   |  Region: us-east-1  |  AZ: use1-az1
-Score: 9  |  Type: c7a.24xlarge   |  Region: us-east-1  |  AZ: use1-az2
-...
+```bash
+./scripts/list-instance-types.sh [options]
 ```
 
-Raw JSON results are saved to `spot-placement-scores-result.json`.
+| Flag                  | Description           | Default     |
+| --------------------- | --------------------- | ----------- |
+| `-c, --vcpu-min NUM`  | Minimum vCPUs         | `96`        |
+| `-C, --vcpu-max NUM`  | Maximum vCPUs         | `192`       |
+| `-m, --mem-min NUM`   | Minimum memory in MiB | `144000`    |
+| `-M, --mem-max NUM`   | Maximum memory in MiB | `256000`    |
+| `-r, --region REGION` | AWS region            | `us-east-1` |
+| `-a, --arch ARCH`     | `x86_64` or `arm64`   | `x86_64`    |
 
-## How It Works
+### request-spot-fleet.sh
 
-1. Uses `ec2 describe-instance-types` to discover all compute-optimized (`c*`) x86_64 instance types matching the vCPU range
-2. Queries `get-spot-placement-scores` individually per type with `--single-availability-zone`
-3. Groups results by AZ and shows the top N types by score
+Requests a Spot Fleet using attribute-based instance selection.
+
+> **Note:** `request-spot-fleet` is a legacy API. For production use, prefer `ec2 create-fleet` with instant mode and `price-capacity-optimized` strategy.
+
+```bash
+./scripts/request-spot-fleet.sh --iam-fleet-role ARN --subnet-id ID [options]
+```
+
+| Flag                       | Description                   | Default              |
+| -------------------------- | ----------------------------- | -------------------- |
+| `-f, --iam-fleet-role ARN` | IAM fleet role ARN (required) |                      |
+| `-s, --subnet-id ID`       | Subnet ID (required)          |                      |
+| `-i, --ami-id ID`          | AMI ID                        | latest AL2023 x86_64 |
+| `-r, --region REGION`      | AWS region                    | `us-east-1`          |
+| `-n, --count NUM`          | Target capacity               | `1`                  |
+| `-k, --key-name NAME`      | SSH key pair name             |                      |
+| `-d, --dry-run`            | Validate without launching    |                      |
+
+## Configs
+
+| File                                      | Description                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| `spot-scores-by-type.yaml`                | Scores specific instance types (c5a, c6a, c6i, c7a, c7i .24xlarge) in us-east-1 |
+| `spot-scores-by-attributes.yaml`          | Scores by attributes: x86_64, 96-192 vCPUs, 196-256 GiB memory, us-east-1       |
+| `get-spot-placement-scores-skeleton.yaml` | Full `get-spot-placement-scores` API input skeleton with all available fields   |
 
 ## Spot Placement Score
 
-A [Spot placement score](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-placement-score.html) indicates how likely a Spot request will succeed in a given Region or Availability Zone, scored from 1 to 10 (10 = highly likely to succeed). It does not guarantee capacity or predict interruption risk — it's a point-in-time recommendation.
+A [Spot placement score](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-placement-score.html) indicates how likely a Spot request will succeed in a given Region or AZ, scored 1-10 (10 = highly likely). It's a point-in-time recommendation, not a capacity guarantee.
 
 Use cases:
+
 - Identify optimal AZs for single-AZ workloads
-- Relocate or scale Spot capacity to a different Region when current capacity decreases
-- Simulate future capacity needs to pick the best Region for expansion
+- Relocate or scale Spot capacity when current capacity decreases
+- Simulate future capacity needs to pick the best Region
 
 Limitations:
+
 - Target capacity limit is based on your recent Spot usage
-- Request configuration rate limits apply within a 24-hour window
-- You must specify at least 3 different instance types, otherwise scores will always be low
-- No additional cost to use
+- Rate limits apply within a 24-hour window
+- At least 3 instance types required, otherwise scores will be low
 
 ## Spot Best Practices
 
-From the AWS [Spot best practices guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html):
+From the [Spot best practices guide](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html):
 
-1. **Prepare for interruptions** — Architect for fault tolerance. Use [EC2 rebalance recommendations](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/rebalance-recommendations.html) and the 2-minute [interruption notice](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-interruptions.html). Create EventBridge rules to capture these signals and checkpoint or gracefully handle interruptions.
-
-2. **Be flexible on instance types and AZs** — A good rule of thumb is to be flexible across at least 10 instance types per workload. Include older generations (less On-Demand demand) and larger sizes (if vertically scalable). Use all AZs in your VPC.
-
-3. **Use attribute-based instance type selection** — Specify attributes (vCPUs, memory, storage) instead of explicit instance types. This automatically includes new instance types as they launch.
-
-4. **Use placement scores** — Use this script (or the console) to find the Regions/AZs most likely to have capacity before launching.
-
-5. **Use Auto Scaling groups or EC2 Fleet** — Manage aggregate capacity rather than individual instances. These services automatically replace interrupted instances.
-
-6. **Use `price-capacity-optimized` allocation strategy** — Provisions from the most-available pools at the lowest price, reducing interruption likelihood.
-
+1. **Prepare for interruptions** — Use [rebalance recommendations](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/rebalance-recommendations.html) and the 2-minute [interruption notice](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-interruptions.html). Create EventBridge rules to capture these signals.
+2. **Be flexible** — Target at least 10 instance types. Include older generations and larger sizes. Use all AZs.
+3. **Use attribute-based selection** — Specify attributes (vCPUs, memory) instead of explicit types. New types are included automatically.
+4. **Use placement scores** — Find the best Regions/AZs before launching.
+5. **Use Auto Scaling groups or EC2 Fleet** — Manage aggregate capacity, not individual instances.
+6. **Use `price-capacity-optimized`** — Provisions from the most-available pools at the lowest price.
 7. **Use integrated AWS services** — EMR, ECS, EKS, Batch, SageMaker, Elastic Beanstalk, and GameLift all have built-in Spot support.
 
 ### Recommended Spot request methods
 
-| Method | Recommended? | Notes |
-|--------|:---:|-------|
-| `CreateAutoScalingGroup` | ✅ | Best for managed lifecycle + auto scaling |
-| `CreateFleet` (instant mode) | ✅ | Best for self-managed lifecycle without auto scaling |
-| `RunInstances` | ⚠️ | Single instance type only, no mixed configurations |
-| `RequestSpotFleet` | ❌ | Legacy, no planned investment |
-| `RequestSpotInstances` | ❌ | Legacy, no planned investment |
+| Method                       | Recommended? | Notes                                   |
+| ---------------------------- | :----------: | --------------------------------------- |
+| `CreateAutoScalingGroup`     |      ✅      | Managed lifecycle + auto scaling        |
+| `CreateFleet` (instant mode) |      ✅      | Self-managed lifecycle, no auto scaling |
+| `RunInstances`               |      ⚠️      | Single instance type only               |
+| `RequestSpotFleet`           |      ❌      | Legacy, no planned investment           |
+| `RequestSpotInstances`       |      ❌      | Legacy, no planned investment           |
