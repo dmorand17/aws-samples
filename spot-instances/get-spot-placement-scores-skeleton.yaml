@@ -1,0 +1,71 @@
+InstanceTypes:  # The instance types.
+- ''
+TargetCapacity: 0 # [REQUIRED] The target capacity.
+TargetCapacityUnitType: vcpu # The unit for the target capacity. Valid values are: vcpu, memory-mib, units.
+SingleAvailabilityZone: true # Specify true so that the response returns a list of scored Availability Zones.
+RegionNames: # The Regions used to narrow down the list of Regions to be scored.
+- ''
+InstanceRequirementsWithMetadata: # The attributes for the instance types.
+  ArchitectureTypes:  # The architecture type.
+  - i386
+  VirtualizationTypes: # The virtualization type.
+  - hvm
+  InstanceRequirements: # The attributes for the instance types.
+    VCpuCount:  # [REQUIRED] The minimum and maximum number of vCPUs.
+      Min: 0  # [REQUIRED] The minimum number of vCPUs.
+      Max: 0 # The maximum number of vCPUs.
+    MemoryMiB: # [REQUIRED] The minimum and maximum amount of memory, in MiB.
+      Min: 0  # [REQUIRED] The minimum amount of memory, in MiB.
+      Max: 0 # The maximum amount of memory, in MiB.
+    CpuManufacturers: # The CPU manufacturers to include.
+    - intel
+    MemoryGiBPerVCpu: # The minimum and maximum amount of memory per vCPU, in GiB.
+      Min: 0.0  # The minimum amount of memory per vCPU, in GiB.
+      Max: 0.0 # The maximum amount of memory per vCPU, in GiB.
+    ExcludedInstanceTypes: # The instance types to exclude.
+    - ''
+    InstanceGenerations: # Indicates whether current or previous generation instance types are included.
+    - current
+    SpotMaxPricePercentageOverLowestPrice: 0 # [Price protection] The price protection threshold for Spot Instances, as a percentage higher than an identified Spot price.
+    OnDemandMaxPricePercentageOverLowestPrice: 0 # [Price protection] The price protection threshold for On-Demand Instances, as a percentage higher than an identified On-Demand price.
+    BareMetal: included # Indicates whether bare metal instance types must be included, excluded, or required. Valid values are: included, required, excluded.
+    BurstablePerformance: included # Indicates whether burstable performance T instance types are included, excluded, or required. Valid values are: included, required, excluded.
+    RequireHibernateSupport: true # Indicates whether instance types must support hibernation for On-Demand Instances.
+    NetworkInterfaceCount: # The minimum and maximum number of network interfaces.
+      Min: 0  # The minimum number of network interfaces.
+      Max: 0 # The maximum number of network interfaces.
+    LocalStorage: included # Indicates whether instance types with instance store volumes are included, excluded, or required. Valid values are: included, required, excluded.
+    LocalStorageTypes: # The type of local storage that is required.
+    - hdd
+    TotalLocalStorageGB: # The minimum and maximum amount of total local storage, in GB.
+      Min: 0.0  # The minimum amount of total local storage, in GB.
+      Max: 0.0 # The maximum amount of total local storage, in GB.
+    BaselineEbsBandwidthMbps: # The minimum and maximum baseline bandwidth to Amazon EBS, in Mbps.
+      Min: 0  # The minimum baseline bandwidth, in Mbps.
+      Max: 0 # The maximum baseline bandwidth, in Mbps.
+    AcceleratorTypes: # The accelerator types that must be on the instance type.
+    - gpu
+    AcceleratorCount: # The minimum and maximum number of accelerators (GPUs, FPGAs, or Amazon Web Services Inferentia chips) on an instance.
+      Min: 0  # The minimum number of accelerators.
+      Max: 0 # The maximum number of accelerators.
+    AcceleratorManufacturers: # Indicates whether instance types must have accelerators by specific manufacturers.
+    - amazon-web-services
+    AcceleratorNames: # The accelerators that must be on the instance type.
+    - a100
+    AcceleratorTotalMemoryMiB: # The minimum and maximum amount of total accelerator memory, in MiB.
+      Min: 0  # The minimum amount of accelerator memory, in MiB.
+      Max: 0 # The maximum amount of accelerator memory, in MiB.
+    NetworkBandwidthGbps: # The minimum and maximum amount of baseline network bandwidth, in gigabits per second (Gbps).
+      Min: 0.0  # The minimum amount of network bandwidth, in Gbps.
+      Max: 0.0 # The maximum amount of network bandwidth, in Gbps.
+    AllowedInstanceTypes: # The instance types to apply your specified attributes against.
+    - ''
+    MaxSpotPriceAsPercentageOfOptimalOnDemandPrice: 0 # [Price protection] The price protection threshold for Spot Instances, as a percentage of an identified On-Demand price.
+    BaselinePerformanceFactors: # The baseline performance to consider, using an instance family as a baseline reference.
+      Cpu:  # The CPU performance to consider, using an instance family as the baseline reference.
+        References:  # Specify an instance family to use as the baseline reference for CPU performance.
+        - InstanceFamily: ''  # The instance family to use as a baseline reference.
+    RequireEncryptionInTransit: true # Specifies whether instance types must support encrypting in-transit traffic between instances.
+DryRun: true # Checks whether you have the required permissions for the action, without actually making the request, and provides an error response.
+MaxResults: 0 # The maximum number of items to return for this request.
+NextToken: '' # The token returned from a previous paginated request.
