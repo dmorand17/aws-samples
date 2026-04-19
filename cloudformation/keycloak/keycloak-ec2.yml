@@ -1,0 +1,264 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: Keycloak non-prod
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Networking"
+        Parameters:
+          - VpcId
+          - KeycloakPublicSubnets
+          - KeycloakPrivateSubnets
+      - Label:
+          default: "RES Parameters"
+        Parameters:
+          - ServiceAccountPasswordArn
+      - Label:
+          default: "Keycloak"
+        Parameters:
+          - KeycloakUsername
+          - KeycloakVersion
+Parameters:
+  VpcId:
+    Description: VPC where RES resources are created
+    Type: AWS::EC2::VPC::Id
+  KeycloakPublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    AllowedPattern: .+
+    Description: Select 1 public subnet from different Availability Zones.
+  KeycloakPrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    AllowedPattern: .+
+    Description: Select 1 public subnet from different Availability Zones.
+  KeycloakAllowIpCidr:
+    Type: String
+    Description: CIDR to allow access to Keycloak
+  ServiceAccountPasswordArn:
+    Type: String
+    Description: ARN of the password secret for the ServiceAccount
+  AcsUrl:
+    Type: String
+    Description: ACS Url for RES
+  ResUrl:
+    Type: String
+    Description: RES Url (ALB or Public Domain)
+  ClientId:
+    Type: String
+    Description: Cognito clientId (e.g. urn:amazon:cognito:sp:<User pool>)
+  KeycloakVersion:
+    Type: String
+    Default: 24.0.3
+  KeycloakUsername:
+    Type: String
+    Default: admin
+Resources:
+
+  # Create a Keycloak secret
+  KeycloakSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub KeycloakSecretec2-${AWS::StackName}
+      Description: Keycloak secret
+      GenerateSecretString:
+        PasswordLength: 14
+        ExcludeCharacters: '"@/\''$`,;!%<>#'
+
+  # Create IAM role for ec2 instance
+  KeycloakEC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: KeycloakEC2InstancePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref KeycloakSecret
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  KeycloakEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref KeycloakEC2InstanceRole
+
+  # Create security group for Keycloak
+  KeycloakSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Keycloak security group
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref KeycloakAllowIpCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref KeycloakLambdaSecurityGroup
+
+  # EC2 instance for Keycloak
+  KeycloakEC2Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    Properties:
+      # Use AL2 AMI
+      ImageId: ami-0a1179631ec8933d7
+      InstanceType: t2.micro
+      IamInstanceProfile: !Ref KeycloakEC2InstanceProfile
+      SubnetId: !Select [0, !Ref KeycloakPublicSubnets]
+      SecurityGroupIds:
+        - !Ref KeycloakSecurityGroup
+      Tags:
+        - Key: Name
+          Value: Keycloak-non-prod
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum -y install java-17-amazon-corretto-headless
+
+          export KEYCLOAK_VERSION=${KeycloakVersion}
+          mkdir /root/keycloak && cd /root/keycloak
+
+          wget https://github.com/keycloak/keycloak/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.zip
+          unzip keycloak-$KEYCLOAK_VERSION.zip
+          cd keycloak-$KEYCLOAK_VERSION
+
+          export KC_HTTP_PORT=80 # This doesn't seem to work, and defaulted to 8080
+          export KEYCLOAK_ADMIN=${KeycloakUsername}
+          # Get the password from Secrets Manager
+          export KEYCLOAK_ADMIN_PASSWORD=$(aws secretsmanager get-secret-value --secret-id ${KeycloakSecret} --query SecretString --region ${AWS::Region} --output text)
+
+          # Start Keycloak
+          nohup ./bin/kc.sh start-dev --http-port 80 > keycloak.log &
+
+          # Wait for Keycloak to start
+          # FIXME fix this to check for Keycloak to be up rather than sleeping
+          echo "Sleeping for 90 seconds"
+          sleep 90
+
+          # Login to Keycloak
+          ./bin/kcadm.sh config credentials --server http://0.0.0.0:80 --realm master --user admin --password $KEYCLOAK_ADMIN_PASSWORD
+
+          # Create realm named 'res'
+          ./bin/kcadm.sh create realms -s realm=res -s enabled=true -o
+
+          # Set sslRequired to NONE
+          ./bin/kcadm.sh update realms/master -s sslRequired=NONE --server http://0.0.0.0:80
+          ./bin/kcadm.sh update realms/res -s sslRequired=NONE --server http://0.0.0.0:80
+          
+          # Signal stack to continue
+          # /opt/aws/bin/cfn-signal -e $? --stack "${AWS::StackName}" --resource "KeycloakWaitConditionHandle" --region "${AWS::Region}"
+          /opt/aws/bin/cfn-signal -e $? --stack "${AWS::StackName}" --resource "KeycloakEC2Instance" --region "${AWS::Region}"
+
+  KeycloakLambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: 
+                  - !Ref KeycloakSecret
+                  - !Ref ServiceAccountPasswordArn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # Create security group for lambda function
+  KeycloakLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Keycloak Lambda security group
+      VpcId: !Ref VpcId
+
+  KeycloakHandlerFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: 'Keycloak Configuration Handler'
+      FunctionName: !Sub KeycloakConfigurationHandler-${AWS::StackName}
+      MemorySize: 128
+      Architectures:
+        - x86_64
+      PackageType: Image
+      Timeout: 300 # 5 minutes
+      Role: !GetAtt KeycloakLambdaExecutionRole.Arn
+      Code:
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/keycloak-handler:latest
+        # S3Bucket: !Ref KeycloakBucket
+        # S3Key: lambda_package.zip
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref KeycloakLambdaSecurityGroup
+        SubnetIds: !Ref KeycloakPrivateSubnets
+      Environment:
+        Variables:
+          KEYCLOAK_URL: !Sub http://${KeycloakEC2Instance.PrivateIp}:80
+          KEYCLOAK_ADMIN: !Ref KeycloakUsername
+          KEYCLOAD_ADMIN_PASSWORD: !Ref KeycloakSecret
+          SERVICEACCOUNT_SECRET: !Ref ServiceAccountPasswordArn
+          ACS_URL: !Ref AcsUrl 
+          RES_URL: !Ref ResUrl
+          CLIENT_ID: !Ref ClientId
+
+  # KeycloakWaitConditionHandle:
+  #   Type: AWS::CloudFormation::WaitConditionHandle
+  #   Properties: {}
+
+  # KeycloakWaitCondition:
+  #   Type: AWS::CloudFormation::WaitCondition
+  #   DependsOn: KeycloakEC2Instance
+  #   Properties:
+  #     Count: 1
+  #     Handle: !Ref KeycloakWaitConditionHandle
+  #     Timeout: 900 # 15 minutes
+
+  CustomResource:
+    Type: Custom::ConfigureKeycloak
+    # DependsOn: KeycloakWaitCondition
+    DependsOn: KeycloakEC2Instance
+    Properties:
+      ServiceToken: !GetAtt KeycloakHandlerFunction.Arn
+
+Outputs:
+  KeycloakUrl:
+    Description: Keycloak Administrator Url
+    Value: !Sub http://${KeycloakEC2Instance.PublicIp}:80
+    
