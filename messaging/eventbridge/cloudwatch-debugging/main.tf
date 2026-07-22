@@ -1,0 +1,90 @@
+# Configure AWS Provider
+provider "aws" {
+  region = var.region
+
+  default_tags {
+    tags = {
+      Environment = "sandbox"
+      cost-center = "111111"
+      ManagedBy   = "Terraform"
+    }
+  }
+}
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.100"
+    }
+  }
+
+  # This sets the version constraint to a minimum of 1.10 for native state file locking support
+  required_version = "~> 1.10"
+
+  backend "s3" {}
+}
+
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
+module "terraform_state" {
+  # TODO: pin to a released tag instead of main branch
+  source = "github.com/dmorand17/terraform-aws-tfstate?ref=main"
+
+  bucket_name = "tfstate"
+  key_prefix  = "eventbridge-cloudwatch-debugging"
+  tags = {
+    Environment = "Dev"
+    Project     = "CloudWatch Debugging"
+  }
+}
+
+# Create an EventBridge rule
+resource "aws_cloudwatch_event_rule" "all_events" {
+  name        = "capture-all-events"
+  description = "Capture all AWS events and send to CloudWatch"
+
+  # This event pattern captures all events
+  event_pattern = jsonencode({
+    "account" : ["${data.aws_caller_identity.current.account_id}"]
+  })
+}
+
+# Create a CloudWatch log group
+resource "aws_cloudwatch_log_group" "events_log_group" {
+  name              = "/aws/events/${var.log_group_name}"
+  retention_in_days = var.log_retention_days
+}
+
+# Grant EventBridge permission to write to the CloudWatch log group
+resource "aws_cloudwatch_log_resource_policy" "eventbridge_log_policy" {
+  policy_name = "eventbridge-cloudwatch-log-policy"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = [
+            "delivery.logs.amazonaws.com",
+            "events.amazonaws.com",
+          ]
+        }
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.events_log_group.arn}:*"
+      }
+    ]
+  })
+}
+
+# Create the EventBridge target
+resource "aws_cloudwatch_event_target" "cloudwatch_logs" {
+  rule      = aws_cloudwatch_event_rule.all_events.name
+  target_id = "SendToCloudWatch"
+  arn       = aws_cloudwatch_log_group.events_log_group.arn
+}

@@ -1,195 +1,107 @@
-# AWS Samples Repository
+# AWS Samples
 
-A comprehensive collection of AWS service samples, infrastructure templates, and deployment examples across various AWS services. This repository serves as a practical reference for implementing common AWS patterns and solutions.
+A collection of self-contained AWS service samples, infrastructure templates, and
+deployment examples spanning compute, storage, networking, security, AI/ML, and cost
+management. Each sample is a practical, standalone reference for a common AWS pattern.
 
-## 🚀 Quick Start
+## 🚀 Quick start
 
-Each sample directory contains its own README with specific deployment instructions. Browse the sections below to find the AWS service you're interested in.
+Every sample lives in its own directory with its own README and deployment steps.
 
-## 📁 Repository Structure
+```bash
+# 1. Pick a sample from the catalog below
+cd security/ssm
 
-### 🤖 AI/ML Services
+# 2. Read its README, then deploy
+aws cloudformation deploy \
+  --template-file ssm-instance-profile.yaml \
+  --stack-name ssm-instance-profile \
+  --capabilities CAPABILITY_NAMED_IAM
+```
 
-#### [Amazon Q](./amazon-q/)
+## 📁 Samples
 
-- **S3 for Q - Multiple Buckets**: CDK-based solution for enabling Amazon Q Business access to multiple S3 buckets with CloudFront distribution and metadata generation
-- **S3 for Q - Single Bucket**: CloudFormation template for single bucket Amazon Q integration
+Samples are grouped by purpose into top-level category directories.
 
-#### [Amazon Bedrock](./bedrock/)
+### AI / ML — [`ai-ml/`](./ai-ml/)
 
-- **DeepSeek R1 8B**: Deployment example for DeepSeek R1 model on AWS Bedrock
+| Sample | Description | IaC |
+|---|---|---|
+| [amazon-q/s3-for-q-multiple-buckets](./ai-ml/amazon-q/s3-for-q-multiple-buckets/) | Amazon Q Business access to multiple S3 buckets with CloudFront and metadata generation | CDK (Python) |
+| [amazon-q/s3-for-q-single-bucket](./ai-ml/amazon-q/s3-for-q-single-bucket/) | Single-bucket Amazon Q integration | CloudFormation |
+| [bedrock/deepseek-r1-8B](./ai-ml/bedrock/deepseek-r1-8B/) | Import and test the DeepSeek R1 model on Amazon Bedrock | Python |
+| [kendra-index](./ai-ml/kendra-index/) | GenAI Kendra index setup | CloudFormation |
+| [sagemaker](./ai-ml/sagemaker/) | SageMaker notebook instance | CloudFormation |
+| [translate-lambda-stack](./ai-ml/translate-lambda-stack/) | Lambda-based translation service | CloudFormation |
 
-#### [Amazon SageMaker](./cloudformation/sagemaker/)
+### Compute — [`compute/`](./compute/)
 
-- **Notebook Templates**: CloudFormation templates for SageMaker notebook instances
+| Sample | Description | IaC |
+|---|---|---|
+| [eks-setup](./compute/eks-setup/) | Step-by-step EKS cluster (VPC, control plane, data plane) | CloudFormation + scripts |
+| [eks-example](./compute/eks-example/) | Standalone EKS deployment example | CloudFormation |
+| [macos](./compute/macos/) | macOS EC2 instance on a dedicated host | CloudFormation |
+| [parallelcluster](./compute/parallelcluster/) | AWS ParallelCluster (Slurm) with Munge key generation; sample config wired to the basic-network VPC | Scripts + config |
 
-### 🏗️ Infrastructure & Compute
+### Networking — [`networking/`](./networking/)
 
-#### [Amazon EKS](./cloudformation/eks-setup/)
+| Sample | Description | IaC |
+|---|---|---|
+| [vpc](./networking/vpc/) | VPC with public/private subnets, regional NAT gateway, and gateway endpoints | CloudFormation |
+| [transit-gateway](./networking/transit-gateway/) | Transit Gateway configuration | CloudFormation |
+| [nlb](./networking/nlb/) | Network Load Balancer with encrypted access logs | CloudFormation |
+| [alb-maintenance](./networking/alb-maintenance/) | ALB maintenance-window automation | Scripts |
 
-- **Complete EKS Setup**: Step-by-step CloudFormation templates for EKS cluster deployment
-- **EKS Examples**: Additional EKS deployment examples and configurations
+### Storage & data — [`storage-data/`](./storage-data/)
 
-#### [AWS ParallelCluster](./parallelcluster/)
+| Sample | Description | IaC |
+|---|---|---|
+| [s3](./storage-data/s3/) | S3 bucket deployment templates | CloudFormation |
+| [dynamodb/productcatalog](./storage-data/dynamodb/productcatalog/) | Product-catalog sample with data-loading scripts | Scripts + JSON |
+| [datasync/sync-by-mtime](./storage-data/datasync/sync-by-mtime/) | DataSync filtered by modification time | Terraform + CloudFormation |
 
-- **Open OnDemand Integration**: Scripts and configurations for AWS ParallelCluster with Open OnDemand integration
-- **Munge Key Generation**: Automated Munge key creation for Slurm authentication
+### Security & identity — [`security/`](./security/)
 
-#### [Application Load Balancer](./alb-maintenance/)
+| Sample | Description | IaC |
+|---|---|---|
+| [keycloak](./security/keycloak/) | Keycloak on EC2 and ECS | CloudFormation |
+| [iam](./security/iam/) | IAM role creation example | CloudFormation |
+| [ssm](./security/ssm/) | IAM instance profile for Session Manager access (no SSH/bastion) | CloudFormation |
 
-- **Maintenance Window Management**: Automation scripts for ALB maintenance windows
+### Analytics — [`analytics/`](./analytics/)
 
-#### [Network Load Balancer](./nlb/)
+| Sample | Description | IaC |
+|---|---|---|
+| [opensearch](./analytics/opensearch/) | OpenSearch domain example | CloudFormation |
 
-- **Encrypted Access Logs**: NLB configuration with encrypted access logging
+### Messaging & events — [`messaging/`](./messaging/)
 
-### 🗄️ Storage & Data
+| Sample | Description | IaC |
+|---|---|---|
+| [eventbridge/cloudwatch-debugging](./messaging/eventbridge/cloudwatch-debugging/) | EventBridge to CloudWatch Logs debugging setup | Terraform |
+| [eventbridge/sagemaker-canvas-events](./messaging/eventbridge/sagemaker-canvas-events/) | EventBridge integration with SageMaker Canvas | CloudFormation |
 
-#### [Amazon S3](./cloudformation/s3/)
+### Management & governance — [`management/`](./management/)
 
-- **Deployment Templates**: CloudFormation templates for S3 bucket deployment
-- **Sample Templates**: Various S3 configuration examples
-
-#### [Amazon DynamoDB](./dynamodb/)
-
-- **Product Catalog**: Sample product catalog implementation with data loading scripts
-
-#### [AWS DataSync](./datasync/)
-
-- **Sync by Modification Time**: Terraform and CloudFormation examples for DataSync with modification time filtering
-
-### 🔐 Security & Identity
-
-#### [Keycloak](./cloudformation/keycloak/)
-
-- **EC2 Deployment**: Keycloak deployment on EC2 instances
-- **ECS Deployment**: Containerized Keycloak deployment
-- **Infrastructure Setup**: Complete Keycloak infrastructure templates
-
-#### [IAM](./cloudformation/iam/)
-
-- **Role Creation Examples**: Sample IAM role creation templates
-
-### 🔍 Search & Analytics
-
-#### [Amazon OpenSearch](./cloudformation/opensearch/)
-
-- **OpenSearch Examples**: Deployment templates and Terraform configurations
-
-#### [Amazon Kendra](./cloudformation/kendra-index/)
-
-- **GenAI Kendra Index**: CloudFormation template for Kendra index setup
-
-### 📡 Networking
-
-#### [VPC](./cloudformation/vpc/)
-
-- **Network Templates**: VPC configuration examples
-- **Default Security Groups**: Security group management templates
-
-#### [Transit Gateway](./cloudformation/transit-gateway/)
-
-- **TGW Configuration**: Transit Gateway setup templates
-
-### 🔔 Event-Driven Architecture
-
-#### [Amazon EventBridge](./eventbridge/)
-
-- **CloudWatch Debugging**: Terraform setup for EventBridge with CloudWatch integration
-- **SageMaker Canvas Events**: EventBridge integration with SageMaker Canvas
-
-### 💰 Cost Management
-
-#### [Budget Notifications](./budget-notification/)
-
-- **Terraform Budget Setup**: Automated budget notification system with SNS integration
-
-### 🛠️ Development Tools
-
-#### [Custom Resources](./cloudformation/custom-resource/)
-
-- **Q S3 Access**: Custom CloudFormation resource for Amazon Q S3 access
-
-#### [Lambda](./cloudformation/translate-lambda-stack/)
-
-- **Translation Service**: Lambda-based translation service with CloudFormation
-
-### 🏷️ Resource Management
-
-#### [Resource Tag Sync](./resource-tag-sync/)
-
-- **Tag Synchronization**: Automated resource tagging solutions
-
-## 🛠️ Infrastructure as Code
-
-This repository includes examples using multiple IaC tools:
-
-- **CloudFormation**: YAML and JSON templates
-- **Terraform**: HCL configurations with S3 backend
-- **AWS CDK**: TypeScript/Python infrastructure code
-- **Shell Scripts**: Deployment and automation scripts
+| Sample | Description | IaC |
+|---|---|---|
+| [budget-notification](./management/budget-notification/) | Budget notifications with SNS | Terraform |
+| [custom-resource](./management/custom-resource/) | Custom resource enabling Amazon Q S3 access | CloudFormation |
 
 ## 📋 Prerequisites
 
-Most samples require:
-
-- AWS CLI configured with appropriate credentials
-- Python 3.x (for CDK and Python scripts)
-- Terraform (for Terraform examples)
-- Docker (for containerized solutions)
-
-## 🚀 Getting Started
-
-1. **Choose a sample** from the directory structure above
-2. **Navigate to the sample directory** and read its README
-3. **Follow the deployment instructions** specific to that sample
-4. **Customize the configuration** for your environment
-
-## 🔧 Common Patterns
-
-### Environment Management
-
-Many samples include environment-specific configurations:
-
-- `environments/` directories for Terraform projects
-- Environment-specific backend configurations
-- Variable files for different deployment stages
-
-### Security Best Practices
-
-- IAM roles with least privilege
-- Encrypted storage and communications
-- Secrets management with AWS Secrets Manager
-- Security group configurations
-
-### Monitoring & Logging
-
-- CloudWatch integration
-- SNS notifications
-- Structured logging
-- Cost monitoring
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Follow the existing directory structure
-2. Include comprehensive README files
-3. Add appropriate license headers
-4. Test deployments before submitting
+- AWS CLI v2, configured with credentials for the target account
+- Terraform (for Terraform samples)
+- Python 3.12+ (for CDK and Python samples)
+- Docker (for containerized samples)
 
 ## 📄 License
 
-This project is licensed under the MIT License - see individual sample directories for specific licensing information.
-
-## 🆘 Support
-
-For issues or questions:
-
-1. Check the specific sample's README
-2. Review AWS documentation for the service
-3. Create an issue in this repository
+Licensed under the MIT License. Individual samples may include their own `LICENSE`
+file — check the sample directory for specifics.
 
 ---
 
-**Note**: These samples are for educational and reference purposes. Always review and customize configurations for production use, following AWS best practices and your organization's security requirements.
+**Note:** These samples are for educational and reference purposes. Review and harden
+configurations before production use, following AWS best practices and your
+organization's security requirements.

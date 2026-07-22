@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Creates an IAM Role and Instance Profile with the AmazonSSMManagedInstanceCore
+  managed policy, enabling EC2 instances to connect via AWS Systems Manager
+  Session Manager (no SSH/bastion needed for private subnet access).
+
+Resources:
+  SSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-SSMRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Purpose
+          Value: SSM Session Manager Access
+
+  SSMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-InstanceProfile'
+      Roles:
+        - !Ref SSMRole
+
+Outputs:
+  InstanceProfileArn:
+    Description: ARN of the Instance Profile — use when launching new instances
+    Value: !GetAtt SSMInstanceProfile.Arn
+
+  InstanceProfileName:
+    Description: Name of the Instance Profile
+    Value: !Ref SSMInstanceProfile
+
+  RoleArn:
+    Description: ARN of the IAM Role
+    Value: !GetAtt SSMRole.Arn
