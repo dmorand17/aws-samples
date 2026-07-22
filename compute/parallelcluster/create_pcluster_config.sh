@@ -77,9 +77,14 @@ HeadNode:
   Iam:
     AdditionalIamPolicies:
       - Policy: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-      - Policy: arn:aws:iam::aws:policy/AmazonS3FullAccess
       - Policy: arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
       - Policy: $HEAD_POLICY
+    # Scoped read-only S3 access to the cluster config bucket only.
+    # AmazonS3FullAccess replaced with S3Access because nodes only read
+    # startup scripts from this bucket; no writes back to S3 are performed.
+    S3Access:
+      - BucketName: $BUCKET_NAME
+        EnableWriteAccess: false
   CustomActions:
     OnNodeConfigured:
       Script: >-
@@ -180,12 +185,17 @@ LoginNodes:
       Iam:
         AdditionalIamPolicies:
           - Policy: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-          - Policy: arn:aws:iam::aws:policy/AmazonS3FullAccess
           - Policy: arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
-          - Policy: arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess              
+          - Policy: arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
+        # Scoped read-only S3 access to the cluster config bucket only.
+        # AmazonS3FullAccess replaced with S3Access because login nodes only
+        # read the configure_login_nodes.sh script from this bucket.
+        S3Access:
+          - BucketName: $BUCKET_NAME
+            EnableWriteAccess: false              
 Region: $REGION
 Image:
-  Os: alinux2
+  Os: alinux2023
 DirectoryService:
   DomainName: $DOMAIN_1.$DOMAIN_2
   DomainAddr: ldap://$LDAP_ENDPOINT

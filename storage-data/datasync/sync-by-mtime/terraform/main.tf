@@ -1,9 +1,11 @@
 # main.tf
 terraform {
+  required_version = "~> 1.10"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 5.100"
     }
   }
 }
@@ -44,6 +46,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "source" {
   }
 }
 
+resource "aws_s3_bucket_public_access_block" "source" {
+  bucket                  = aws_s3_bucket.source.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 # Destination S3 bucket
 resource "aws_s3_bucket" "destination" {
   bucket = "${var.destination_bucket_name}-${data.aws_caller_identity.current.account_id}"
@@ -63,6 +73,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "destination" {
       sse_algorithm = "AES256"
     }
   }
+}
+
+resource "aws_s3_bucket_public_access_block" "destination" {
+  bucket                  = aws_s3_bucket.destination.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # Iterate over the files in source-files directory and add them to source s3 bucket
@@ -107,14 +125,9 @@ resource "aws_iam_role" "datasync" {
   })
 }
 
-# Attach AWS managed policy called AWSDataSyncFullAccess
-resource "aws_iam_role_policy_attachment" "datasync" {
-  role       = aws_iam_role.datasync.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSDataSyncFullAccess"
-}
-
-
 # Custom policy for S3 access
+# AWSDataSyncFullAccess managed policy removed — this inline policy covers all
+# permissions DataSync requires for S3 locations (read, write, tagging, multipart).
 resource "aws_iam_role_policy" "s3_access" {
   name = "datasync-s3-bucket-access"
   role = aws_iam_role.datasync.id
@@ -143,6 +156,7 @@ resource "aws_iam_role_policy" "s3_access" {
           "s3:ListMultipartUploadParts",
           "s3:PutObject",
           "s3:GetObjectTagging",
+          "s3:PutObjectTagging",
           "s3:GetObjectAttributes",
           "s3:ReplicateObject"
         ]

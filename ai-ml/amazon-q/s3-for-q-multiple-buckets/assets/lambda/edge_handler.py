@@ -10,7 +10,7 @@ logger.info("Loading function")
 This function is to remove the first portion of the path to properly map tot he location in S3
 
 example uri:
-qs3-awsdocs-872771682304/well-architected/wellarchitected-serverless-applications-lens.pdf -> 
+qs3-awsdocs-<account-id>/well-architected/wellarchitected-serverless-applications-lens.pdf ->
 /well-architected/wellarchitected-serverless-applications-lens.pdf
 """
 

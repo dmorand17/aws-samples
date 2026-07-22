@@ -1,4 +1,7 @@
 #!/bin/bash
+set -euo pipefail
+
+[[ $# -ge 1 ]] || { echo "Usage: $0 <parameters-file>"; exit 1; }
 
 aws cloudformation deploy \
   --template-file keycloak-ec2.yml \

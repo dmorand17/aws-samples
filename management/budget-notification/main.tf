@@ -1,10 +1,12 @@
 # main.tf
 
 terraform {
+  required_version = "~> 1.10"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 5.100"
     }
   }
 }
@@ -63,8 +65,7 @@ resource "aws_budgets_budget" "monthly_budget" {
   # Budget is monthly and resets each month
   time_unit = "MONTHLY"
 
-  # Start from the first day of the current month
-  time_period_start = formatdate("YYYY-MM-01_00:00", timestamp())
+  time_period_start = var.budget_start_time
 
   # No end date (ongoing budget)
   time_period_end = "2087-06-15_00:00"

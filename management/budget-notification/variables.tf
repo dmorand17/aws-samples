@@ -27,6 +27,12 @@ variable "create_sns_topic" {
   default     = true
 }
 
+variable "budget_start_time" {
+  description = "The start date for the budget period (format: YYYY-MM-DD_HH:MM)"
+  type        = string
+  default     = "2024-01-01_00:00"
+}
+
 variable "tags" {
   description = "A map of tags to assign to the resources"
   type        = map(string)

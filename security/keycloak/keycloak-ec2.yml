@@ -123,13 +123,15 @@ Resources:
       ResourceSignal:
         Timeout: PT15M
     Properties:
-      # Use AL2 AMI
-      ImageId: ami-0a1179631ec8933d7
-      InstanceType: t2.micro
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
+      InstanceType: t3.micro
       IamInstanceProfile: !Ref KeycloakEC2InstanceProfile
       SubnetId: !Select [0, !Ref KeycloakPublicSubnets]
       SecurityGroupIds:
         - !Ref KeycloakSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
       Tags:
         - Key: Name
           Value: Keycloak-non-prod

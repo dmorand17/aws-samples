@@ -18,12 +18,18 @@ Resources:
     Properties:
       # Add account number to end of bucket name
       BucketName: !Sub ${BucketName}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
 
   CloudFrontOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -40,8 +46,7 @@ Resources:
     Properties:
       DistributionConfig:
         DefaultCacheBehavior:
-          ForwardedValues:
-            QueryString: false
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
           TargetOriginId: origin-bucket
           ViewerProtocolPolicy: redirect-to-https
         DefaultRootObject: index.html
@@ -145,7 +150,7 @@ Resources:
               }
       Handler: index.lambda_handler
       Role: !GetAtt LambdaRole.Arn
-      Runtime: python3.10
+      Runtime: python3.13
       Environment:
         Variables:
           CLOUDFRONT_DISTRIBUTION_DOMAIN: !GetAtt CloudFrontWebDistribution.DomainName
@@ -192,7 +197,7 @@ Resources:
     Properties:
       Description: Adds an event notification to a S3 bucket
       Handler: index.handler
-      Runtime: python3.10
+      Runtime: python3.13
       Role: !GetAtt 'ApplyNotificationFunctionRole.Arn'
       Timeout: 240
       Code:

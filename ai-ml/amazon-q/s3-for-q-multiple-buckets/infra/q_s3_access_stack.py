@@ -60,19 +60,6 @@ class QS3AccessStack(Stack):
 
             self.s3_buckets.append(s3_bucket)
 
-        # Create the Origin Access Control
-        self.origin_access_control = cloudfront.CfnOriginAccessControl(
-            self,
-            "OriginAccessControl",
-            origin_access_control_config=cloudfront.CfnOriginAccessControl.OriginAccessControlConfigProperty(
-                name="MyOriginAccessControl",
-                description="Origin Access Control for CloudFront",
-                origin_access_control_origin_type="s3",
-                signing_behavior="always",
-                signing_protocol="sigv4"
-            )
-        )
-
         edge_lambda = _lambda.Function(
             self,
             "EdgeLambdaFunction",
@@ -86,7 +73,7 @@ class QS3AccessStack(Stack):
         # Create CloudFront distribution
         self.cf_distribution = cloudfront.Distribution(self, "CloudFrontDistribution",
             default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3Origin(self.s3_buckets[0]),
+                origin=origins.S3BucketOrigin.with_origin_access_control(self.s3_buckets[0]),
             )
         )
 
@@ -94,7 +81,7 @@ class QS3AccessStack(Stack):
             # print(f"Adding behavior for bucket: {bucket.bucket_name}, {i=}")
             self.cf_distribution.add_behavior(
                 path_pattern=f"/{bucket.bucket_name}/*",
-                origin=origins.S3Origin(bucket),
+                origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
                 cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD,
@@ -106,50 +93,8 @@ class QS3AccessStack(Stack):
                 )]
             )
 
-        cfnDistribution = self.cf_distribution.node.default_child
-        for i in range(len(self.s3_buckets) + 1):
-            # Update OriginAccessControl
-            cfnDistribution.add_property_override(
-                f'DistributionConfig.Origins.{i}.OriginAccessControlId',
-                self.origin_access_control.get_att('Id'),
-            )
-            cfnDistribution.add_property_override(
-                f'DistributionConfig.Origins.{i}.S3OriginConfig.OriginAccessIdentity',
-                '',
-            )
-
-
         logger.debug("Printing out stack details")
         logger.debug(cdk_utils.print_children(self, level=0))
-
-        # Delete the S3 Origin Access Identity statements
-        for bucket in self.s3_buckets:
-            policy_node = bucket.node.find_child("Policy").node.default_child    # CfnBucketPolicy
-            # print(f"{policy_node=}")
-            # bucket_policy = bucket.policy
-            # print(f"{bucket_policy=}")
-            # policy_document = bucket_policy.document
-            # print(f"{policy_document=}")
-            # print(policy_document.to_json())
-            policy_node.add_property_override("PolicyDocument.Statement.0", None)
-            
-
-        # Delete the CloudFrontOriginAccessIdentity resources
-        # self.node.find_child("")
-
-        # Add OriginAccessControl
-        # print(f"Adding OriginAccessControl for: {bucket.bucket_name}")
-        # cfnDistribution.add_property_override(
-        #     f'DistributionConfig.Origins.{i}.OriginAccessControlId',
-        #     self.origin_access_control.get_att('Id'),
-        # )
-
-        # # Remove OriginAccessIdentity
-        # print(f"Removing OriginAccessIdentity for: {bucket.bucket_name}")
-        # cfnDistribution.add_property_override(
-        #     f'DistributionConfig.Origins.{i}.S3OriginConfig.OriginAccessIdentity',
-        #     '',
-        # )
 
         for bucket in self.s3_buckets:
             # Update bucket policy to pull in the origin access policy from CloudFront

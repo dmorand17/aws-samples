@@ -97,7 +97,7 @@ Resources:
         Ref: keycloakserverInstanceProfile
       ImageId:
         Ref: SsmParameterValueAmznLinux
-      InstanceType: t2.micro
+      InstanceType: t3.micro
       SecurityGroupIds:
         - Fn::GetAtt:
             - keycloaksg
@@ -108,11 +108,14 @@ Resources:
           Value: keycloak-demo-1
         - Key: Stage
           Value: prod
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
       UserData:
         Fn::Base64: |
           #!/bin/bash
-          sudo yum update -y
-          sudo amazon-linux-extras install -y docker
+          sudo dnf update -y
+          sudo dnf install -y docker
           sudo systemctl start docker
           sudo usermod -a -G docker ec2-user
           sudo systemctl enable docker
@@ -156,7 +159,7 @@ Resources:
       FunctionName: copyS3DataFunction
       Description: Lambda Function with code to copy sample data to S3 bucket
       Handler: "index.lambda_handler"
-      Runtime: python3.9
+      Runtime: python3.13
       Timeout: 300
       Role: !GetAtt LambdaRole.Arn
       Code:
@@ -307,7 +310,7 @@ Resources:
 Parameters:
   SsmParameterValueAmznLinux:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-x86_64-gp2
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
   AssetBucketName:
     Type: String
     Default: "Not-needed-for-self-paced-lab-in-customer-account"

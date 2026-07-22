@@ -143,13 +143,16 @@ Resources:
       ResourceSignal:
         Timeout: PT15M
     Properties:
-      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64:75}}'
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
       InstanceType: t3.micro
       KeyName: !Ref Keypair
       IamInstanceProfile: !Ref KeycloakEC2InstanceProfile
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds:
         - !Ref KeycloakSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
       Tags:
        - Key: Name
          Value: !Sub keycloak-${AWS::StackName}

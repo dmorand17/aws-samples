@@ -48,10 +48,10 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: "*"
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
             Action: "es:*"
             Resource: !Sub arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/*/*
-      EngineVersion: "OpenSearch_2.13"
+      EngineVersion: "OpenSearch_2.17"
       ClusterConfig:
         InstanceType: "r6g.2xlarge.search"
       EBSOptions:

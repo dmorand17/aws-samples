@@ -15,7 +15,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 5.100"
     }
   }
 
@@ -29,7 +29,8 @@ terraform {
 data "aws_caller_identity" "current" {}
 
 module "terraform_state" {
-  source = "github.com/dmorand17/terraform-aws-tfstate"
+  # TODO: pin to a released tag instead of main branch
+  source = "github.com/dmorand17/terraform-aws-tfstate?ref=main"
 
   bucket_name = "tfstate"
   key_prefix  = "eventbridge-cloudwatch-debugging"
@@ -56,37 +57,24 @@ resource "aws_cloudwatch_log_group" "events_log_group" {
   retention_in_days = var.log_retention_days
 }
 
-# Create an IAM role for EventBridge
-resource "aws_iam_role" "eventbridge_role" {
-  name = "eventbridge-cloudwatch-role"
+# Grant EventBridge permission to write to the CloudWatch log group
+resource "aws_cloudwatch_log_resource_policy" "eventbridge_log_policy" {
+  policy_name = "eventbridge-cloudwatch-log-policy"
 
-  assume_role_policy = jsonencode({
+  policy_document = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "events.amazonaws.com"
+          Service = [
+            "delivery.logs.amazonaws.com",
+            "events.amazonaws.com",
+          ]
         }
-      }
-    ]
-  })
-}
-
-# Create an IAM policy for writing to CloudWatch Logs
-resource "aws_iam_role_policy" "eventbridge_policy" {
-  name = "eventbridge-cloudwatch-policy"
-  role = aws_iam_role.eventbridge_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
         Action = [
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
+          "logs:PutLogEvents",
         ]
         Resource = "${aws_cloudwatch_log_group.events_log_group.arn}:*"
       }
@@ -99,5 +87,4 @@ resource "aws_cloudwatch_event_target" "cloudwatch_logs" {
   rule      = aws_cloudwatch_event_rule.all_events.name
   target_id = "SendToCloudWatch"
   arn       = aws_cloudwatch_log_group.events_log_group.arn
-  # role_arn  = aws_iam_role.eventbridge_role.arn
 }

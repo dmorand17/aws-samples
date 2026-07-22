@@ -1,7 +1,7 @@
 import aws_cdk as core
 import aws_cdk.assertions as assertions
 
-from infra.q_s3_access_stack_migrated import QS3AccessStack
+from infra.q_s3_access_stack import QS3AccessStack
 
 
 # example tests. To run these tests, uncomment this file along with the example

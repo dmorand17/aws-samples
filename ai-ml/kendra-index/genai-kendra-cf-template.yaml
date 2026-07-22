@@ -174,7 +174,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Handler: index.lambda_handler
-      Runtime: python3.8
+      Runtime: python3.13
       Role: !GetAtt 'DataSourceSyncLambdaRole.Arn'
       Timeout: 900
       MemorySize: 1024

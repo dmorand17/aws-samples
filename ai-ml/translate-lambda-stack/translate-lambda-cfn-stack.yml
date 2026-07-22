@@ -65,7 +65,7 @@ Resources:
     Properties:
       FunctionName: !Ref LambdaFunctionName
       Handler: index.lambda_handler
-      Runtime: python3.7
+      Runtime: python3.13
       Timeout: 900
       Environment:
         Variables:
@@ -160,6 +160,18 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Ref InputBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: 's3:ObjectCreated:Put'
@@ -178,6 +190,18 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Ref OutputBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
 Outputs:
   IAMRoleExecutionForLambdaARN:
     Description: The ARN of the IAM role that was created for the Lambda to assume
