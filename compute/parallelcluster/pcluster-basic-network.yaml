@@ -1,0 +1,74 @@
+# Sample AWS ParallelCluster (Slurm) configuration wired to the networking
+# created by ../../networking/vpc/basic-network.yaml.
+#
+# Topology follows the ParallelCluster best practice of a head node in a public
+# subnet and compute nodes in private subnets (which reach the internet through
+# the regional NAT gateway in basic-network.yaml).
+#
+# Populate the placeholders below from the basic-network stack outputs:
+#
+#   STACK=basic-network
+#   PUBLIC=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+#     --query "Stacks[0].Outputs[?OutputKey=='PublicSubnetIds'].OutputValue" --output text)
+#   PRIVATE=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+#     --query "Stacks[0].Outputs[?OutputKey=='PrivateSubnetIds'].OutputValue" --output text)
+#   echo "public:  $PUBLIC"     # -> HeadNode / LoginNodes SubnetId (use the first)
+#   echo "private: $PRIVATE"    # -> compute queue SubnetIds
+#
+# Create the cluster with:
+#   pcluster create-cluster --cluster-name demo \
+#     --cluster-configuration pcluster-basic-network.yaml --region <region>
+
+Region: us-east-1
+
+Image:
+  Os: alinux2023
+
+HeadNode:
+  InstanceType: c6i.large
+  # First public subnet from the basic-network PublicSubnetIds output.
+  Networking:
+    SubnetId: subnet-PUBLIC1
+  Ssh:
+    KeyName: my-key-pair
+  LocalStorage:
+    RootVolume:
+      VolumeType: gp3
+      Size: 50
+  Iam:
+    AdditionalIamPolicies:
+      # Enables Session Manager access without opening SSH / a bastion.
+      - Policy: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: compute
+      AllocationStrategy: lowest-price
+      ComputeResources:
+        - Name: compute-cr
+          Instances:
+            - InstanceType: c6i.large
+          MinCount: 0
+          MaxCount: 8
+      # Private subnets from the basic-network PrivateSubnetIds output.
+      Networking:
+        SubnetIds:
+          - subnet-PRIVATE1
+          - subnet-PRIVATE2
+      ComputeSettings:
+        LocalStorage:
+          RootVolume:
+            VolumeType: gp3
+            Size: 50
+      Iam:
+        AdditionalIamPolicies:
+          - Policy: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+# Shared /home and /shared for the cluster, backed by EFS.
+SharedStorage:
+  - Name: shared
+    MountDir: /shared
+    StorageType: Efs
+    EfsSettings:
+      Encrypted: true

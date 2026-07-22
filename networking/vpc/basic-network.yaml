@@ -1,0 +1,482 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  VPC with public and private subnets, an internet gateway, and a regional NAT
+  gateway. Availability Zones are selected automatically per region from a
+  region-to-AZ-ID map, so placement is stable across accounts and portable
+  across regions. Private subnet route tables send internet-bound traffic to the
+  regional NAT gateway, and S3/DynamoDB traffic to gateway endpoints. A regional
+  NAT gateway attaches directly to the VPC (no public subnet required) and
+  automatically expands across AZs based on workload presence.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network
+        Parameters:
+          - VpcCidr
+          - ProvisionThirdAz
+      - Label:
+          default: Availability Zone 1 subnet CIDRs
+        Parameters:
+          - PublicSubnet1Cidr
+          - PrivateSubnet1Cidr
+      - Label:
+          default: Availability Zone 2 subnet CIDRs
+        Parameters:
+          - PublicSubnet2Cidr
+          - PrivateSubnet2Cidr
+      - Label:
+          default: Availability Zone 3 subnet CIDRs (optional)
+        Parameters:
+          - PublicSubnet3Cidr
+          - PrivateSubnet3Cidr
+    ParameterLabels:
+      VpcCidr:
+        default: VPC CIDR block
+      ProvisionThirdAz:
+        default: Provision a third Availability Zone?
+      PublicSubnet1Cidr:
+        default: Public subnet 1 CIDR
+      PublicSubnet2Cidr:
+        default: Public subnet 2 CIDR
+      PublicSubnet3Cidr:
+        default: Public subnet 3 CIDR (optional)
+      PrivateSubnet1Cidr:
+        default: Private subnet 1 CIDR
+      PrivateSubnet2Cidr:
+        default: Private subnet 2 CIDR
+      PrivateSubnet3Cidr:
+        default: Private subnet 3 CIDR (optional)
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.42.0.0/16
+    Description: CIDR block for the VPC.
+
+  ProvisionThirdAz:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Whether to provision a third public/private subnet pair. The third AZ must
+      have a ZoneId3 entry in the RegionMap for the deploy region.
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.42.0.0/24
+    Description: CIDR block for the public subnet in the first Availability Zone.
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.42.1.0/24
+    Description: CIDR block for the public subnet in the second Availability Zone.
+
+  PublicSubnet3Cidr:
+    Type: String
+    Default: 10.42.2.0/24
+    Description: >-
+      CIDR block for the public subnet in the third Availability Zone. Used only
+      when ProvisionThirdAz is true.
+
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.42.10.0/24
+    Description: CIDR block for the private subnet in the first Availability Zone.
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.42.11.0/24
+    Description: CIDR block for the private subnet in the second Availability Zone.
+
+  PrivateSubnet3Cidr:
+    Type: String
+    Default: 10.42.12.0/24
+    Description: >-
+      CIDR block for the private subnet in the third Availability Zone. Used
+      only when ProvisionThirdAz is true.
+
+Mappings:
+  # Region-to-AZ-ID map. AZ IDs (e.g. use1-az1) point to the same physical AZ in
+  # every account, unlike AZ names (us-east-1a) which are shuffled per account.
+  # A Lambda custom resource resolves each ID to the AZ name the subnet needs.
+  #
+  # Scoped to US and EU commercial regions. Only regions listed here can be
+  # deployed to; add an entry to support more. Verify a region's AZ IDs and
+  # your account's access with:
+  #   aws ec2 describe-availability-zones --region <region> \
+  #     --query 'AvailabilityZones[].[ZoneName,ZoneId]' --output table
+  RegionMap:
+    us-east-1:
+      # Prefer the newer az4-az6 over the older, more capacity-constrained
+      # az1-az3.
+      ZoneId1: use1-az4
+      ZoneId2: use1-az5
+      ZoneId3: use1-az6
+    us-east-2:
+      ZoneId1: use2-az1
+      ZoneId2: use2-az2
+      ZoneId3: use2-az3
+    us-west-2:
+      ZoneId1: usw2-az1
+      ZoneId2: usw2-az2
+      ZoneId3: usw2-az3
+    eu-west-1:
+      ZoneId1: euw1-az1
+      ZoneId2: euw1-az2
+      ZoneId3: euw1-az3
+    eu-west-2:
+      ZoneId1: euw2-az1
+      ZoneId2: euw2-az2
+      ZoneId3: euw2-az3
+    eu-west-3:
+      ZoneId1: euw3-az1
+      ZoneId2: euw3-az2
+      ZoneId3: euw3-az3
+    eu-central-1:
+      ZoneId1: euc1-az1
+      ZoneId2: euc1-az2
+      ZoneId3: euc1-az3
+    eu-north-1:
+      ZoneId1: eun1-az1
+      ZoneId2: eun1-az2
+      ZoneId3: eun1-az3
+
+Conditions:
+  HasThirdAz: !Equals [!Ref ProvisionThirdAz, "true"]
+
+Resources:
+  # --- AZ ID -> AZ name resolution -------------------------------------------
+  # Subnets require an AZ name, but the RegionMap stores stable AZ IDs and there
+  # is no intrinsic function to convert one to the other. This Lambda-backed
+  # custom resource performs the lookup, once per AZ.
+  AzLookupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: az-lookup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ec2:DescribeAvailabilityZones
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:*:*:*"
+
+  AzLookupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 30
+      Role: !GetAtt AzLookupRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  zone_id = event['ResourceProperties']['ZoneId']
+                  ec2 = boto3.client('ec2')
+                  resp = ec2.describe_availability_zones(
+                      Filters=[{'Name': 'zone-id', 'Values': [zone_id]}]
+                  )
+                  zones = resp['AvailabilityZones']
+                  if not zones:
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                          {'Error': f'No Availability Zone found for zone-id {zone_id}'})
+                      return
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {'ZoneName': zones[0]['ZoneName']}, physicalResourceId=zone_id)
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  AvailabilityZone1:
+    Type: Custom::AzLookup
+    Properties:
+      ServiceToken: !GetAtt AzLookupFunction.Arn
+      ZoneId: !FindInMap [RegionMap, !Ref "AWS::Region", ZoneId1]
+
+  AvailabilityZone2:
+    Type: Custom::AzLookup
+    Properties:
+      ServiceToken: !GetAtt AzLookupFunction.Arn
+      ZoneId: !FindInMap [RegionMap, !Ref "AWS::Region", ZoneId2]
+
+  AvailabilityZone3:
+    Type: Custom::AzLookup
+    Condition: HasThirdAz
+    Properties:
+      ServiceToken: !GetAtt AzLookupFunction.Arn
+      ZoneId: !FindInMap [RegionMap, !Ref "AWS::Region", ZoneId3]
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-igw"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # --- Public subnets --------------------------------------------------------
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnet1Cidr
+      AvailabilityZone: !GetAtt AvailabilityZone1.ZoneName
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-1"
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnet2Cidr
+      AvailabilityZone: !GetAtt AvailabilityZone2.ZoneName
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-2"
+
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: HasThirdAz
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnet3Cidr
+      AvailabilityZone: !GetAtt AvailabilityZone3.ZoneName
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-3"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-rt"
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasThirdAz
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      RouteTableId: !Ref PublicRouteTable
+
+  # --- Private subnets -------------------------------------------------------
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      AvailabilityZone: !GetAtt AvailabilityZone1.ZoneName
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      AvailabilityZone: !GetAtt AvailabilityZone2.ZoneName
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-2"
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: HasThirdAz
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnet3Cidr
+      AvailabilityZone: !GetAtt AvailabilityZone3.ZoneName
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-3"
+
+  # --- Regional NAT gateway --------------------------------------------------
+  # A regional NAT gateway attaches to the VPC rather than a subnet and expands
+  # across AZs automatically. AllocationId/SubnetId are intentionally omitted:
+  # AWS manages Elastic IP addresses and AZ coverage in automatic mode.
+  RegionalNatGateway:
+    Type: AWS::EC2::NatGateway
+    # A public NAT gateway requires the internet gateway to be attached to the
+    # VPC first. Because this gateway attaches to the VPC directly (not a
+    # subnet), nothing implicitly orders it after the attachment, so declare it.
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityMode: regional
+      ConnectivityType: public
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-regional-nat"
+
+  # A single route table shared across private subnets in all AZs, since the
+  # regional NAT gateway exposes one NAT gateway ID usable from every AZ.
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-rt"
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref RegionalNatGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasThirdAz
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable
+
+  # --- Gateway endpoints -----------------------------------------------------
+  # Gateway endpoints add prefix-list routes to the associated route tables so
+  # private-subnet traffic to S3 and DynamoDB stays on the AWS network instead
+  # of egressing through the regional NAT gateway.
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  DynamoDbGatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.dynamodb"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+Outputs:
+  VpcId:
+    Description: VPC ID.
+    Value: !Ref Vpc
+
+  PublicSubnetIds:
+    Description: Public subnet IDs.
+    Value: !Join
+      - ","
+      - - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+        - !If [HasThirdAz, !Ref PublicSubnet3, !Ref "AWS::NoValue"]
+
+  PrivateSubnetIds:
+    Description: Private subnet IDs.
+    Value: !Join
+      - ","
+      - - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !If [HasThirdAz, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+
+  AvailabilityZoneIds:
+    Description: AZ IDs selected from the RegionMap (stable across accounts).
+    Value: !Join
+      - ","
+      - - !FindInMap [RegionMap, !Ref "AWS::Region", ZoneId1]
+        - !FindInMap [RegionMap, !Ref "AWS::Region", ZoneId2]
+        - !If
+          - HasThirdAz
+          - !FindInMap [RegionMap, !Ref "AWS::Region", ZoneId3]
+          - !Ref "AWS::NoValue"
+
+  AvailabilityZoneNames:
+    Description: Resolved AZ names for this account/region.
+    Value: !Join
+      - ","
+      - - !GetAtt AvailabilityZone1.ZoneName
+        - !GetAtt AvailabilityZone2.ZoneName
+        - !If
+          - HasThirdAz
+          - !GetAtt AvailabilityZone3.ZoneName
+          - !Ref "AWS::NoValue"
+
+  S3GatewayEndpointId:
+    Description: S3 gateway endpoint ID.
+    Value: !Ref S3GatewayEndpoint
+
+  DynamoDbGatewayEndpointId:
+    Description: DynamoDB gateway endpoint ID.
+    Value: !Ref DynamoDbGatewayEndpoint
