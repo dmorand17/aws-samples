@@ -717,6 +717,36 @@ git commit -m "feat: add typer CLI, dry-run, and README for bulk account creatio
 
 ---
 
+### Task 5: Progress bar for account creation
+
+**Files:**
+- Modify: `management/bulk-account-creation/create_accounts.py` (the `run` provisioning loop)
+- Modify: `management/bulk-account-creation/tests/test_cli.py`
+
+**Interfaces:** No signature changes. Behavioral change only inside `run`.
+
+Replace the two inline `typer.echo(..., err=True)` per-account lines in the
+provisioning loop with a `typer.progressbar` over `specs`. The bar renders to
+stderr (stdout stays reserved for results); `item_show_func` displays the
+current account's name. Results collection, output writing, and the non-zero
+exit on failure are unchanged.
+
+```python
+results = []
+with typer.progressbar(
+    specs,
+    label="Creating accounts",
+    item_show_func=lambda spec: spec.account_name if spec else "",
+) as progress:
+    for spec in progress:
+        results.append(provision_account(org, spec, poll_interval, timeout))
+```
+
+Add a test asserting all specs are provisioned through the bar (success path
+exits 0, results written for every account, count matches manifest rows).
+
+---
+
 ## Self-Review Notes
 
 - **Spec coverage:** manifest CSV input (T1), stdout/csv/json output + `--output-file` (T2, T4), OU-must-exist fail-fast (T3 `verify_ous`, called in T4 preflight), create→poll→move sequential flow (T3), partial-failure tolerance + non-zero exit (T4), `--dry-run` (T4), Stubber-based tests, no live calls (T1–T4). IAM list and caveats land in the README (T4).
