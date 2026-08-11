@@ -1,6 +1,8 @@
 import textwrap
+
 import pytest
-from create_accounts import parse_manifest, AccountSpec
+
+from create_accounts import AccountSpec, parse_manifest
 
 
 def _write(tmp_path, content):

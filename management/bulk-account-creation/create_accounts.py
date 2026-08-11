@@ -5,6 +5,9 @@ import json
 import time
 from dataclasses import dataclass, field
 
+import boto3
+import typer
+
 _REQUIRED_COLUMNS = ("account_name", "email")
 _RESERVED_COLUMNS = ("account_name", "email", "ou_id")
 
@@ -141,3 +144,76 @@ def parse_manifest(path, default_ou_id):
             AccountSpec(row["account_name"].strip(), email, ou_id, tags)
         )
     return specs
+
+
+app = typer.Typer(help="Bulk-create AWS accounts from a CSV manifest.")
+
+
+def _org_client():
+    return boto3.client("organizations")
+
+
+def _sts_client():
+    return boto3.client("sts")
+
+
+@app.command()
+def run(
+    manifest: str = typer.Option(..., help="Path to the CSV manifest."),
+    ou_id: str = typer.Option(
+        None, help="Default target OU for rows without ou_id."
+    ),
+    output_format: str = typer.Option(
+        "stdout", help="Result output: stdout, csv, or json."
+    ),
+    output_file: str = typer.Option(
+        None, help="Destination file for csv/json output."
+    ),
+    dry_run: bool = typer.Option(
+        False, help="Validate and print the plan without creating accounts."
+    ),
+    poll_interval: float = typer.Option(
+        15.0, help="Seconds between provisioning status polls."
+    ),
+    timeout: float = typer.Option(
+        300.0, help="Max seconds to wait per account."
+    ),
+):
+    if output_format not in ("stdout", "csv", "json"):
+        raise typer.BadParameter("output-format must be stdout, csv, or json")
+    if output_format in ("csv", "json") and not output_file:
+        raise typer.BadParameter(
+            f"--output-file is required for {output_format} output"
+        )
+
+    specs = parse_manifest(manifest, ou_id)
+    org = _org_client()
+    verify_ous(org, {spec.ou_id for spec in specs})
+
+    if dry_run:
+        typer.echo("Dry run — no accounts will be created:")
+        for spec in specs:
+            typer.echo(f"  {spec.account_name}  {spec.email}  -> {spec.ou_id}")
+        return
+
+    results = []
+    for spec in specs:
+        typer.echo(f"Creating {spec.account_name} ({spec.email})...", err=True)
+        result = provision_account(org, spec, poll_interval, timeout)
+        typer.echo(f"  {result.status}: {result.reason or result.account_id}",
+                   err=True)
+        results.append(result)
+
+    rendered = format_results(results, output_format)
+    if output_file:
+        with open(output_file, "w") as handle:
+            handle.write(rendered)
+    else:
+        typer.echo(rendered)
+
+    if any(r.status == "FAILED" for r in results):
+        raise typer.Exit(code=1)
+
+
+if __name__ == "__main__":
+    app()

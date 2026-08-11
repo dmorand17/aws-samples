@@ -1,6 +1,4 @@
 """Set dummy AWS credentials so botocore doesn't try live credential providers."""
-import os
-
 import pytest
 
 

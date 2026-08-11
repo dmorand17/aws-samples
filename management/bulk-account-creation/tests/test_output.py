@@ -1,8 +1,8 @@
 import csv
 import io
 import json
-from create_accounts import AccountResult, format_results
 
+from create_accounts import AccountResult, format_results
 
 RESULTS = [
     AccountResult("Dev", "111111111111", "SUCCEEDED", None),

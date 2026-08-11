@@ -27,9 +27,8 @@ def test_verify_ous_raises_for_missing_ou():
         service_error_code="OrganizationalUnitNotFoundException",
         expected_params={"OrganizationalUnitId": "ou-bad"},
     )
-    with stubber:
-        with pytest.raises(ValueError, match="ou-bad"):
-            verify_ous(client, ["ou-good", "ou-bad"])
+    with stubber, pytest.raises(ValueError, match="ou-bad"):
+        verify_ous(client, ["ou-good", "ou-bad"])
 
 
 def test_provision_account_success_moves_into_ou():

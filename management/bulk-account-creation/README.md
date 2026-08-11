@@ -1,0 +1,98 @@
+# Bulk Account Creation
+
+Bulk-create AWS accounts from a CSV manifest and move each into a pre-existing
+Organizational Unit (OU). Uses the AWS Organizations API directly — no Control
+Tower required.
+
+## Purpose
+
+Automate the creation of multiple AWS accounts from a single CSV file. Each
+account is created sequentially, polled until provisioning completes, and moved
+into the target OU. The script exits non-zero if any account failed so it
+integrates cleanly with CI pipelines.
+
+## Prerequisites
+
+- Run from the **Organizations management account** or a delegated administrator
+  account with the required IAM permissions.
+- [`uv`](https://docs.astral.sh/uv/) installed.
+- Target OUs must **already exist** before running — this tool does not create OUs.
+
+## Required IAM Permissions
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "organizations:CreateAccount",
+    "organizations:DescribeCreateAccountStatus",
+    "organizations:MoveAccount",
+    "organizations:ListParents",
+    "organizations:DescribeOrganizationalUnit",
+    "sts:GetCallerIdentity"
+  ],
+  "Resource": "*"
+}
+```
+
+## Manifest Format
+
+The manifest is a CSV file with the following columns:
+
+| Column         | Required | Description                                              |
+|----------------|----------|----------------------------------------------------------|
+| `account_name` | Yes      | Display name for the new account                         |
+| `email`        | Yes      | Unique root email address for the account                |
+| `ou_id`        | No       | Target OU ID; falls back to `--ou-id` if blank           |
+
+Any additional columns are passed as account tags.
+
+See [`accounts.csv.sample`](accounts.csv.sample) for an example:
+
+```csv
+account_name,email,ou_id
+Workload-Dev,aws+dev@example.com,ou-abcd-11111111
+Workload-Staging,aws+staging@example.com,ou-abcd-11111111
+Workload-Prod,aws+prod@example.com,
+```
+
+## Usage
+
+```bash
+# Dry run — validate manifest and OUs, create nothing
+uv run create-accounts --manifest accounts.csv --dry-run
+
+# Create accounts, write results as JSON
+uv run create-accounts --manifest accounts.csv \
+  --output-format json --output-file results.json
+
+# Use a default OU for rows without an explicit ou_id
+uv run create-accounts --manifest accounts.csv \
+  --ou-id ou-abcd-11111111 \
+  --output-format csv --output-file results.csv
+```
+
+### Options
+
+| Option            | Default  | Description                                          |
+|-------------------|----------|------------------------------------------------------|
+| `--manifest`      | required | Path to the CSV manifest                             |
+| `--ou-id`         | —        | Default target OU for rows without `ou_id`           |
+| `--output-format` | `stdout` | Result format: `stdout`, `csv`, or `json`            |
+| `--output-file`   | —        | Output file path (required for `csv` and `json`)     |
+| `--dry-run`       | off      | Validate manifest and OUs without creating anything  |
+| `--poll-interval` | 15.0     | Seconds between status polls per account             |
+| `--timeout`       | 300.0    | Max seconds to wait for each account to provision    |
+
+## Caveats
+
+- **Sequential creation.** Accounts are provisioned one at a time. AWS
+  Organizations does not support concurrent `CreateAccount` requests from the
+  same management account.
+- **Idempotency on duplicate email.** If an account with the same email already
+  exists, Organizations returns `FAILED` with `FailureReason: EMAIL_ALREADY_EXISTS`.
+  The script records this as a `FAILED` result rather than crashing. Re-runs will
+  surface duplicates clearly in the output.
+- **Accounts cannot be deleted.** AWS accounts can only be closed, not deleted.
+  Closing an account is a manual process with a 90-day suspension period. Do not
+  create accounts speculatively.
