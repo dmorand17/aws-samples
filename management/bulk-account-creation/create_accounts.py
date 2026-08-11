@@ -198,12 +198,13 @@ def run(
         return
 
     results = []
-    for spec in specs:
-        typer.echo(f"Creating {spec.account_name} ({spec.email})...", err=True)
-        result = provision_account(org, spec, poll_interval, timeout)
-        typer.echo(f"  {result.status}: {result.reason or result.account_id}",
-                   err=True)
-        results.append(result)
+    with typer.progressbar(
+        specs,
+        label="Creating accounts",
+        item_show_func=lambda spec: spec.account_name if spec else "",
+    ) as progress:
+        for spec in progress:
+            results.append(provision_account(org, spec, poll_interval, timeout))
 
     rendered = format_results(results, output_format)
     if output_file:

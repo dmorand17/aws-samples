@@ -70,3 +70,28 @@ def test_cli_csv_without_output_file_errors(tmp_path, monkeypatch):
         app, ["--manifest", _manifest(tmp_path), "--output-format", "csv"]
     )
     assert result.exit_code != 0
+
+
+def test_cli_success_path_writes_all_results(tmp_path, monkeypatch):
+    monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
+    monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+
+    outcomes = iter([
+        AccountResult("Dev", "111111111111", "SUCCEEDED", None),
+        AccountResult("Prod", "222222222222", "SUCCEEDED", None),
+    ])
+    monkeypatch.setattr(
+        create_accounts, "provision_account",
+        lambda c, spec, poll_interval, timeout: next(outcomes),
+    )
+    output_file = tmp_path / "out.json"
+    result = runner.invoke(
+        app,
+        ["--manifest", _manifest(tmp_path),
+         "--output-format", "json", "--output-file", str(output_file)],
+    )
+    assert result.exit_code == 0
+    written = json.loads(output_file.read_text())
+    assert len(written) == 2
+    assert all(r["status"] == "SUCCEEDED" for r in written)
