@@ -1,5 +1,7 @@
 """Bulk-create AWS accounts from a CSV manifest and move each into an OU."""
 import csv
+import io
+import json
 from dataclasses import dataclass, field
 
 _REQUIRED_COLUMNS = ("account_name", "email")
@@ -12,6 +14,51 @@ class AccountSpec:
     email: str
     ou_id: str | None
     tags: dict = field(default_factory=dict)
+
+
+@dataclass
+class AccountResult:
+    account_name: str
+    account_id: str | None
+    status: str
+    reason: str | None = None
+
+
+_RESULT_FIELDS = ("account_name", "account_id", "status", "reason")
+
+
+def format_results(results, output_format):
+    if output_format == "json":
+        return json.dumps(
+            [
+                {
+                    "account_name": r.account_name,
+                    "account_id": r.account_id,
+                    "status": r.status,
+                    "reason": r.reason,
+                }
+                for r in results
+            ],
+            indent=2,
+        )
+    if output_format == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(_RESULT_FIELDS)
+        for r in results:
+            writer.writerow(
+                [r.account_name, r.account_id or "", r.status, r.reason or ""]
+            )
+        return buffer.getvalue()
+    # stdout: aligned table
+    header = f"{'ACCOUNT':<24}{'ACCOUNT ID':<16}{'STATUS':<12}REASON"
+    lines = [header]
+    for r in results:
+        lines.append(
+            f"{r.account_name:<24}{(r.account_id or '-'):<16}"
+            f"{r.status:<12}{r.reason or ''}"
+        )
+    return "\n".join(lines)
 
 
 def parse_manifest(path, default_ou_id):
