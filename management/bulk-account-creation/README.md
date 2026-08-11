@@ -96,3 +96,16 @@ uv run create-accounts --manifest accounts.csv \
 - **Accounts cannot be deleted.** AWS accounts can only be closed, not deleted.
   Closing an account is a manual process with a 90-day suspension period. Do not
   create accounts speculatively.
+
+## Development
+
+Dev tooling (`pytest`, `ruff`) is declared in the `dev` dependency group and
+installed automatically on first `uv run`.
+
+```bash
+# Run the test suite
+uv run pytest
+
+# Lint
+uv run ruff check
+```
