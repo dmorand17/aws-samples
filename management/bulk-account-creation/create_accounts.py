@@ -2,6 +2,7 @@
 import csv
 import io
 import json
+import time
 from dataclasses import dataclass, field
 
 _REQUIRED_COLUMNS = ("account_name", "email")
@@ -59,6 +60,55 @@ def format_results(results, output_format):
             f"{r.status:<12}{r.reason or ''}"
         )
     return "\n".join(lines)
+
+
+def verify_ous(client, ou_ids):
+    missing = []
+    for ou_id in ou_ids:
+        try:
+            client.describe_organizational_unit(OrganizationalUnitId=ou_id)
+        except client.exceptions.OrganizationalUnitNotFoundException:
+            missing.append(ou_id)
+    if missing:
+        raise ValueError(f"OU(s) not found: {', '.join(sorted(missing))}")
+
+
+def provision_account(client, spec, poll_interval, timeout):
+    kwargs = {"AccountName": spec.account_name, "Email": spec.email}
+    if spec.tags:
+        kwargs["Tags"] = [
+            {"Key": k, "Value": v} for k, v in spec.tags.items()
+        ]
+    request_id = client.create_account(**kwargs)["CreateAccountStatus"]["Id"]
+
+    deadline = time.monotonic() + timeout
+    while True:
+        status = client.describe_create_account_status(
+            CreateAccountRequestId=request_id
+        )["CreateAccountStatus"]
+        state = status["State"]
+        if state == "SUCCEEDED":
+            account_id = status["AccountId"]
+            break
+        if state == "FAILED":
+            return AccountResult(
+                spec.account_name, None, "FAILED",
+                status.get("FailureReason", "unknown"),
+            )
+        if time.monotonic() >= deadline:
+            return AccountResult(
+                spec.account_name, None, "FAILED",
+                "timed out waiting for provisioning",
+            )
+        time.sleep(poll_interval)
+
+    parent_id = client.list_parents(ChildId=account_id)["Parents"][0]["Id"]
+    client.move_account(
+        AccountId=account_id,
+        SourceParentId=parent_id,
+        DestinationParentId=spec.ou_id,
+    )
+    return AccountResult(spec.account_name, account_id, "SUCCEEDED", None)
 
 
 def parse_manifest(path, default_ou_id):
