@@ -187,6 +187,7 @@ def run(
         )
 
     specs = parse_manifest(manifest, ou_id)
+    _sts_client().get_caller_identity()
     org = _org_client()
     verify_ous(org, {spec.ou_id for spec in specs})
 

@@ -8,6 +8,11 @@ from create_accounts import AccountResult, app
 runner = CliRunner()
 
 
+class _FakeSts:
+    def get_caller_identity(self):
+        return {}
+
+
 def _manifest(tmp_path):
     p = tmp_path / "accounts.csv"
     p.write_text(
@@ -20,7 +25,7 @@ def _manifest(tmp_path):
 
 def test_cli_dry_run_creates_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
-    monkeypatch.setattr(create_accounts, "_sts_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
 
     def _fail(*a, **k):
@@ -36,7 +41,7 @@ def test_cli_dry_run_creates_nothing(tmp_path, monkeypatch):
 
 def test_cli_reports_failure_with_nonzero_exit(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
-    monkeypatch.setattr(create_accounts, "_sts_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
 
     outcomes = iter([
@@ -59,7 +64,7 @@ def test_cli_reports_failure_with_nonzero_exit(tmp_path, monkeypatch):
 
 def test_cli_csv_without_output_file_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
-    monkeypatch.setattr(create_accounts, "_sts_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
     result = runner.invoke(
         app, ["--manifest", _manifest(tmp_path), "--output-format", "csv"]
