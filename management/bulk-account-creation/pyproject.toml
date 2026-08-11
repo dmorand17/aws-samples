@@ -1,0 +1,25 @@
+[project]
+name = "bulk-account-creation"
+version = "0.1.0"
+description = "Bulk-create AWS accounts from a CSV manifest"
+readme = "README.md"
+authors = [
+    { name = "Doug Morand", email = "dmorand@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.43.68",
+    "typer>=0.27.1",
+]
+
+[project.scripts]
+create-accounts = "create_accounts:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
