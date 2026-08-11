@@ -92,3 +92,21 @@ def test_provision_account_failed_status_becomes_failed_result():
         "Prod", None, "FAILED", "EMAIL_ALREADY_EXISTS"
     )
     stubber.assert_no_pending_responses()
+
+
+def test_provision_account_client_error_returns_failed_result():
+    """A ClientError (e.g. throttle) must not propagate — returns FAILED result."""
+    client = _org_client()
+    stubber = Stubber(client)
+    spec = AccountSpec("Throttled", "throttled@example.com", "ou-target", {})
+    stubber.add_client_error(
+        "create_account",
+        service_error_code="TooManyRequestsException",
+        expected_params={"AccountName": "Throttled", "Email": "throttled@example.com"},
+    )
+    with stubber:
+        result = provision_account(client, spec, poll_interval=0, timeout=30)
+    assert result.status == "FAILED"
+    assert result.reason == "TooManyRequestsException"
+    assert result.account_id is None
+    stubber.assert_no_pending_responses()

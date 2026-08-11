@@ -89,7 +89,7 @@ uv run create-accounts --manifest accounts.csv \
 - **Sequential creation.** Accounts are provisioned one at a time. AWS
   Organizations does not support concurrent `CreateAccount` requests from the
   same management account.
-- **Idempotency on duplicate email.** If an account with the same email already
+- **Duplicate email handling.** If an account with the same email already
   exists, Organizations returns `FAILED` with `FailureReason: EMAIL_ALREADY_EXISTS`.
   The script records this as a `FAILED` result rather than crashing. Re-runs will
   surface duplicates clearly in the output.

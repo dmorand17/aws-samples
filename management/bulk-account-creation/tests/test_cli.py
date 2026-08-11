@@ -95,3 +95,20 @@ def test_cli_success_path_writes_all_results(tmp_path, monkeypatch):
     written = json.loads(output_file.read_text())
     assert len(written) == 2
     assert all(r["status"] == "SUCCEEDED" for r in written)
+    assert [r["account_name"] for r in written] == ["Dev", "Prod"]
+
+
+def test_cli_manifest_value_error_exits_cleanly(tmp_path, monkeypatch):
+    """A duplicate email in the manifest should exit 1 with no traceback."""
+    monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
+
+    bad_manifest = tmp_path / "bad.csv"
+    bad_manifest.write_text(
+        "account_name,email,ou_id\n"
+        "A,dup@example.com,ou-1\n"
+        "B,dup@example.com,ou-1\n"
+    )
+    result = runner.invoke(app, ["--manifest", str(bad_manifest)])
+    assert result.exit_code == 1
+    assert "Traceback" not in (result.output or "")
