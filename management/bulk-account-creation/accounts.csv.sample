@@ -1,0 +1,4 @@
+account_name,email,ou_id
+Workload-Dev,aws+dev@example.com,ou-abcd-11111111
+Workload-Staging,aws+staging@example.com,ou-abcd-11111111
+Workload-Prod,aws+prod@example.com,
