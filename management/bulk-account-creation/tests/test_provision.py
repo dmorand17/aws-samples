@@ -40,6 +40,7 @@ def test_provision_account_success_moves_into_ou():
         "create_account",
         {"CreateAccountStatus": {"Id": "car-1", "State": "IN_PROGRESS"}},
         {"AccountName": "Dev", "Email": "dev@example.com",
+         "RoleName": "OrganizationAccountAccessRole",
          "Tags": [{"Key": "team", "Value": "plat"}]},
     )
     stubber.add_response(
@@ -78,7 +79,8 @@ def test_provision_account_failed_status_becomes_failed_result():
     stubber.add_response(
         "create_account",
         {"CreateAccountStatus": {"Id": "car-2", "State": "IN_PROGRESS"}},
-        {"AccountName": "Prod", "Email": "prod@example.com"},
+        {"AccountName": "Prod", "Email": "prod@example.com",
+         "RoleName": "OrganizationAccountAccessRole"},
     )
     stubber.add_response(
         "describe_create_account_status",
@@ -102,7 +104,11 @@ def test_provision_account_client_error_returns_failed_result():
     stubber.add_client_error(
         "create_account",
         service_error_code="TooManyRequestsException",
-        expected_params={"AccountName": "Throttled", "Email": "throttled@example.com"},
+        expected_params={
+            "AccountName": "Throttled",
+            "Email": "throttled@example.com",
+            "RoleName": "OrganizationAccountAccessRole",
+        },
     )
     with stubber:
         result = provision_account(client, spec, poll_interval=0, timeout=30)

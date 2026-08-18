@@ -98,6 +98,32 @@ def test_cli_success_path_writes_all_results(tmp_path, monkeypatch):
     assert [r["account_name"] for r in written] == ["Dev", "Prod"]
 
 
+def test_cli_role_name_sets_spec_role(tmp_path, monkeypatch):
+    """--role-name reaches each spec; default is OrganizationAccountAccessRole."""
+    monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
+    monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+
+    seen = []
+
+    def _capture(c, spec, poll_interval, timeout):
+        seen.append(spec.role_name)
+        return AccountResult(spec.account_name, "111111111111", "SUCCEEDED", None)
+
+    monkeypatch.setattr(create_accounts, "provision_account", _capture)
+
+    result = runner.invoke(
+        app, ["--manifest", _manifest(tmp_path), "--role-name", "CustomRole"]
+    )
+    assert result.exit_code == 0
+    assert seen == ["CustomRole", "CustomRole"]
+
+    seen.clear()
+    result = runner.invoke(app, ["--manifest", _manifest(tmp_path)])
+    assert result.exit_code == 0
+    assert seen == ["OrganizationAccountAccessRole", "OrganizationAccountAccessRole"]
+
+
 def test_cli_manifest_value_error_exits_cleanly(tmp_path, monkeypatch):
     """A duplicate email in the manifest should exit 1 with no traceback."""
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())

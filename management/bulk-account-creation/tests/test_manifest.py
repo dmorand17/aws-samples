@@ -24,6 +24,26 @@ def test_parse_manifest_resolves_row_and_default_ou(tmp_path):
     ]
 
 
+def test_parse_manifest_resolves_row_and_default_role_name(tmp_path):
+    path = _write(tmp_path, """\
+        account_name,email,ou_id,role_name
+        Dev,dev@example.com,ou-1,CustomRole
+        Prod,prod@example.com,ou-1,
+    """)
+    specs = parse_manifest(path, default_ou_id=None, default_role_name="FallbackRole")
+    assert [s.role_name for s in specs] == ["CustomRole", "FallbackRole"]
+
+
+def test_parse_manifest_role_name_column_not_treated_as_tag(tmp_path):
+    path = _write(tmp_path, """\
+        account_name,email,ou_id,role_name,team
+        Dev,dev@example.com,ou-1,CustomRole,platform
+    """)
+    specs = parse_manifest(path, default_ou_id=None)
+    assert specs[0].tags == {"team": "platform"}
+    assert specs[0].role_name == "CustomRole"
+
+
 def test_parse_manifest_collects_extra_columns_as_tags(tmp_path):
     path = _write(tmp_path, """\
         account_name,email,ou_id,team,env

@@ -10,7 +10,7 @@ import botocore.exceptions
 import typer
 
 _REQUIRED_COLUMNS = ("account_name", "email")
-_RESERVED_COLUMNS = ("account_name", "email", "ou_id")
+_RESERVED_COLUMNS = ("account_name", "email", "ou_id", "role_name")
 
 
 @dataclass
@@ -19,6 +19,7 @@ class AccountSpec:
     email: str
     ou_id: str | None
     tags: dict[str, str] = field(default_factory=dict)
+    role_name: str = "OrganizationAccountAccessRole"
 
 
 @dataclass
@@ -81,7 +82,11 @@ def provision_account(
     client, spec: AccountSpec, poll_interval: float, timeout: float
 ) -> AccountResult:
     try:
-        kwargs = {"AccountName": spec.account_name, "Email": spec.email}
+        kwargs = {
+            "AccountName": spec.account_name,
+            "Email": spec.email,
+            "RoleName": spec.role_name,
+        }
         if spec.tags:
             kwargs["Tags"] = [
                 {"Key": k, "Value": v} for k, v in spec.tags.items()
@@ -122,7 +127,11 @@ def provision_account(
         )
 
 
-def parse_manifest(path: str, default_ou_id: str | None) -> list[AccountSpec]:
+def parse_manifest(
+    path: str,
+    default_ou_id: str | None,
+    default_role_name: str = "OrganizationAccountAccessRole",
+) -> list[AccountSpec]:
     with open(path, newline="") as handle:
         rows = list(csv.DictReader(handle))
     if not rows:
@@ -143,13 +152,17 @@ def parse_manifest(path: str, default_ou_id: str | None) -> list[AccountSpec]:
         if not ou_id:
             raise ValueError(f"row {index}: no OU (set ou_id or --ou-id)")
 
+        role_name = (row.get("role_name") or "").strip() or default_role_name
+
         tags = {
             key: value.strip()
             for key, value in row.items()
             if key not in _RESERVED_COLUMNS
         }
         specs.append(
-            AccountSpec(row["account_name"].strip(), email, ou_id, tags)
+            AccountSpec(
+                row["account_name"].strip(), email, ou_id, tags, role_name
+            )
         )
     return specs
 
@@ -186,6 +199,10 @@ def run(
     timeout: float = typer.Option(
         300.0, help="Max seconds to wait per account."
     ),
+    role_name: str = typer.Option(
+        "OrganizationAccountAccessRole",
+        help="IAM role name created in each new account.",
+    ),
 ):
     if output_format not in ("stdout", "csv", "json"):
         raise typer.BadParameter("output-format must be stdout, csv, or json")
@@ -195,7 +212,7 @@ def run(
         )
 
     try:
-        specs = parse_manifest(manifest, ou_id)
+        specs = parse_manifest(manifest, ou_id, role_name)
     except ValueError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)

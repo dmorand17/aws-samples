@@ -44,6 +44,7 @@ The manifest is a CSV file with the following columns:
 | `account_name` | Yes      | Display name for the new account                         |
 | `email`        | Yes      | Unique root email address for the account                |
 | `ou_id`        | No       | Target OU ID; falls back to `--ou-id` if blank           |
+| `role_name`    | No       | IAM role created in the account; falls back to `--role-name` if blank |
 
 Any additional columns are passed as account tags.
 
@@ -83,6 +84,7 @@ uv run create-accounts --manifest accounts.csv \
 | `--dry-run`       | off      | Validate manifest and OUs without creating anything  |
 | `--poll-interval` | 15.0     | Seconds between status polls per account             |
 | `--timeout`       | 300.0    | Max seconds to wait for each account to provision    |
+| `--role-name`     | `OrganizationAccountAccessRole` | IAM role name created in each new account |
 
 ## Caveats
 
