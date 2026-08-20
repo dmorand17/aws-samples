@@ -28,6 +28,7 @@ def test_cli_dry_run_creates_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
     monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+    monkeypatch.setattr(create_accounts, "existing_account_emails", lambda c: {})
 
     def _fail(*a, **k):
         raise AssertionError("provision_account must not run in dry-run")
@@ -44,6 +45,7 @@ def test_cli_reports_failure_with_nonzero_exit(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
     monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+    monkeypatch.setattr(create_accounts, "existing_account_emails", lambda c: {})
 
     outcomes = iter([
         AccountResult("Dev", "111111111111", "SUCCEEDED", None),
@@ -77,6 +79,7 @@ def test_cli_success_path_writes_all_results(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
     monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+    monkeypatch.setattr(create_accounts, "existing_account_emails", lambda c: {})
 
     outcomes = iter([
         AccountResult("Dev", "111111111111", "SUCCEEDED", None),
@@ -104,6 +107,7 @@ def test_cli_role_name_sets_spec_role(tmp_path, monkeypatch):
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
     monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+    monkeypatch.setattr(create_accounts, "existing_account_emails", lambda c: {})
 
     seen = []
 
@@ -123,6 +127,57 @@ def test_cli_role_name_sets_spec_role(tmp_path, monkeypatch):
     result = runner.invoke(app, ["--manifest", _manifest(tmp_path)])
     assert result.exit_code == 0
     assert seen == ["OrganizationAccountAccessRole", "OrganizationAccountAccessRole"]
+
+
+def test_cli_skips_existing_account_by_email(tmp_path, monkeypatch):
+    """An email that already exists is marked SKIPPED and never provisioned."""
+    monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
+    monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+    monkeypatch.setattr(
+        create_accounts, "existing_account_emails",
+        lambda c: {"dev@example.com": "111111111111"},
+    )
+
+    seen = []
+
+    def _capture(c, spec, poll_interval, timeout):
+        seen.append(spec.account_name)
+        return AccountResult(spec.account_name, "222222222222", "SUCCEEDED", None)
+
+    monkeypatch.setattr(create_accounts, "provision_account", _capture)
+
+    result = runner.invoke(
+        app,
+        ["--manifest", _manifest(tmp_path),
+         "--output-format", "json", "--output-file", str(tmp_path / "o.json")],
+    )
+    assert result.exit_code == 0  # skips are not failures
+    assert seen == ["Prod"]  # Dev already exists, only Prod provisioned
+    written = {r["account_name"]: r for r in json.loads((tmp_path / "o.json").read_text())}
+    assert written["Dev"]["status"] == "SKIPPED"
+    assert written["Dev"]["account_id"] == "111111111111"
+    assert written["Prod"]["status"] == "SUCCEEDED"
+
+
+def test_cli_dry_run_marks_existing_as_skip(tmp_path, monkeypatch):
+    monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
+    monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
+    monkeypatch.setattr(
+        create_accounts, "existing_account_emails",
+        lambda c: {"dev@example.com": "111111111111"},
+    )
+
+    def _fail(*a, **k):
+        raise AssertionError("provision_account must not run in dry-run")
+
+    monkeypatch.setattr(create_accounts, "provision_account", _fail)
+
+    result = runner.invoke(app, ["--manifest", _manifest(tmp_path), "--dry-run"])
+    assert result.exit_code == 0
+    assert "SKIP" in result.stdout
+    assert "CREATE" in result.stdout
 
 
 def test_cli_expired_credentials_exit_cleanly(tmp_path, monkeypatch):

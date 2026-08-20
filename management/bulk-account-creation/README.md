@@ -27,6 +27,7 @@ integrates cleanly with CI pipelines.
     "organizations:CreateAccount",
     "organizations:DescribeCreateAccountStatus",
     "organizations:MoveAccount",
+    "organizations:ListAccounts",
     "organizations:ListParents",
     "organizations:DescribeOrganizationalUnit",
     "sts:GetCallerIdentity"
@@ -107,10 +108,12 @@ uv run create-accounts --manifest accounts.csv \
 - **Sequential creation.** Accounts are provisioned one at a time. AWS
   Organizations does not support concurrent `CreateAccount` requests from the
   same management account.
-- **Duplicate email handling.** If an account with the same email already
-  exists, Organizations returns `FAILED` with `FailureReason: EMAIL_ALREADY_EXISTS`.
-  The script records this as a `FAILED` result rather than crashing. Re-runs will
-  surface duplicates clearly in the output.
+- **Idempotent re-runs.** Before provisioning, the tool lists existing accounts
+  in the organization. Any manifest row whose email already belongs to an
+  account is marked `SKIPPED` (with the existing account ID) and never
+  re-created. Skips are not failures, so re-running the same manifest exits `0`.
+  Email matching is case-insensitive. Note this skips creation only — it does
+  **not** reconcile an existing account's OU placement or tags.
 - **Accounts cannot be deleted.** AWS accounts can only be closed, not deleted.
   Closing an account is a manual process with a 90-day suspension period. Do not
   create accounts speculatively.
