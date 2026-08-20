@@ -2,6 +2,7 @@
 import csv
 import io
 import json
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -216,10 +217,6 @@ def run(
 ):
     if output_format not in ("stdout", "csv", "json"):
         raise typer.BadParameter("output-format must be stdout, csv, or json")
-    if output_format in ("csv", "json") and not output_file:
-        raise typer.BadParameter(
-            f"--output-file is required for {output_format} output"
-        )
 
     try:
         specs = parse_manifest(manifest, ou_id, role_name)
@@ -275,6 +272,7 @@ def run(
         specs,
         label="Creating accounts",
         item_show_func=lambda spec: spec.account_name if spec else "",
+        file=sys.stderr,
     ) as progress:
         for spec in progress:
             account_id = existing.get(spec.email.lower())

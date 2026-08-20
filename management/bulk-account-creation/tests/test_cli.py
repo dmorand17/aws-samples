@@ -65,14 +65,25 @@ def test_cli_reports_failure_with_nonzero_exit(tmp_path, monkeypatch):
     assert [r["status"] for r in written] == ["SUCCEEDED", "FAILED"]
 
 
-def test_cli_csv_without_output_file_errors(tmp_path, monkeypatch):
+def test_cli_json_to_stdout_without_output_file(tmp_path, monkeypatch):
+    """json/csv without --output-file print to stdout for piping."""
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
     monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
     monkeypatch.setattr(create_accounts, "verify_ous", lambda c, o: None)
-    result = runner.invoke(
-        app, ["--manifest", _manifest(tmp_path), "--output-format", "csv"]
+    monkeypatch.setattr(create_accounts, "existing_account_emails", lambda c: {})
+    monkeypatch.setattr(
+        create_accounts, "provision_account",
+        lambda c, spec, poll_interval, timeout: AccountResult(
+            spec.account_name, "111111111111", "SUCCEEDED", None
+        ),
     )
-    assert result.exit_code != 0
+    result = runner.invoke(
+        app, ["--manifest", _manifest(tmp_path), "--output-format", "json"]
+    )
+    assert result.exit_code == 0
+    # stdout is clean, parseable JSON — the progress bar goes to stderr
+    parsed = json.loads(result.stdout)
+    assert [r["account_name"] for r in parsed] == ["Dev", "Prod"]
 
 
 def test_cli_success_path_writes_all_results(tmp_path, monkeypatch):
