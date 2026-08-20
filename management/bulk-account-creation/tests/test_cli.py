@@ -224,6 +224,18 @@ def test_cli_missing_credentials_exit_cleanly(tmp_path, monkeypatch):
     assert "credential" in result.output.lower()
 
 
+def test_cli_missing_manifest_exits_cleanly(tmp_path, monkeypatch):
+    """A manifest path that does not exist should exit 1 with no traceback."""
+    monkeypatch.setattr(create_accounts, "_org_client", lambda: object())
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _FakeSts())
+
+    missing = tmp_path / "nope.csv"
+    result = runner.invoke(app, ["--manifest", str(missing)])
+    assert result.exit_code == 1
+    assert "Traceback" not in (result.output or "")
+    assert "Cannot read manifest" in result.output
+
+
 def test_cli_manifest_value_error_exits_cleanly(tmp_path, monkeypatch):
     """A duplicate email in the manifest should exit 1 with no traceback."""
     monkeypatch.setattr(create_accounts, "_org_client", lambda: object())

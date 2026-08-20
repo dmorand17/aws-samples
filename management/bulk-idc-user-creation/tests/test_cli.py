@@ -171,6 +171,15 @@ def test_cli_missing_credentials_exit_cleanly(tmp_path, monkeypatch):
     assert "credential" in result.output.lower()
 
 
+def test_cli_missing_manifest_exits_cleanly(tmp_path, monkeypatch):
+    monkeypatch.setattr(create_idc_users, "_sts_client", lambda: _FakeSts())
+    missing = tmp_path / "nope.csv"
+    result = runner.invoke(app, ["--manifest", str(missing)])
+    assert result.exit_code == 1
+    assert "Traceback" not in (result.output or "")
+    assert "Cannot read manifest" in result.output
+
+
 def test_cli_manifest_value_error_exits_cleanly(tmp_path, monkeypatch):
     monkeypatch.setattr(create_idc_users, "_sts_client", lambda: _FakeSts())
     bad = tmp_path / "bad.csv"
