@@ -1,0 +1,4 @@
+first_name,last_name,display_name,username,email,memberOf
+Ada,Lovelace,Ada Lovelace,alovelace,ada@example.com,Admins;Developers
+Grace,Hopper,,ghopper,grace@example.com,Developers
+Alan,Turing,Alan Turing,aturing,alan@example.com,
