@@ -74,6 +74,20 @@ The `--manifest` file is read from your current working directory, so keep your
 CSV local. Pin to a tag or commit by appending `@<ref>` before the `#`, e.g.
 `...aws-samples.git@v0.1.0#subdirectory=...`.
 
+### Install as a tool
+
+Install once with [`uv tool`](https://docs.astral.sh/uv/guides/tools/) to get a
+`create-accounts` command on your `PATH`, then run it without the long URL:
+
+```bash
+uv tool install "git+https://github.com/dmorand17/aws-samples.git#subdirectory=management/bulk-account-creation"
+
+create-accounts --manifest accounts.csv --dry-run
+```
+
+Upgrade with `uv tool upgrade bulk-account-creation`; remove with
+`uv tool uninstall bulk-account-creation`.
+
 ### Run from a clone
 
 ```bash
