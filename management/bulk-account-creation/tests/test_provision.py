@@ -5,6 +5,7 @@ from botocore.stub import Stubber
 from create_accounts import (
     AccountResult,
     AccountSpec,
+    existing_account_emails,
     provision_account,
     verify_ous,
 )
@@ -29,6 +30,26 @@ def test_verify_ous_raises_for_missing_ou():
     )
     with stubber, pytest.raises(ValueError, match="ou-bad"):
         verify_ous(client, ["ou-good", "ou-bad"])
+
+
+def test_existing_account_emails_maps_lowercased_email_to_id():
+    client = _org_client()
+    stubber = Stubber(client)
+    stubber.add_response(
+        "list_accounts",
+        {"Accounts": [
+            {"Id": "111111111111", "Email": "Dev@Example.com"},
+            {"Id": "222222222222", "Email": "prod@example.com"},
+        ]},
+        {},
+    )
+    with stubber:
+        mapping = existing_account_emails(client)
+    assert mapping == {
+        "dev@example.com": "111111111111",
+        "prod@example.com": "222222222222",
+    }
+    stubber.assert_no_pending_responses()
 
 
 def test_provision_account_success_moves_into_ou():

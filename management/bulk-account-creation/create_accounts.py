@@ -78,6 +78,16 @@ def verify_ous(client, ou_ids) -> None:
         raise ValueError(f"OU(s) not found: {', '.join(sorted(missing))}")
 
 
+def existing_account_emails(client) -> dict[str, str]:
+    """Map lowercased email -> account_id for every account in the org."""
+    mapping = {}
+    paginator = client.get_paginator("list_accounts")
+    for page in paginator.paginate():
+        for account in page["Accounts"]:
+            mapping[account["Email"].lower()] = account["Id"]
+    return mapping
+
+
 def provision_account(
     client, spec: AccountSpec, poll_interval: float, timeout: float
 ) -> AccountResult:
@@ -235,10 +245,29 @@ def run(
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
+    try:
+        existing = existing_account_emails(org)
+    except botocore.exceptions.ClientError as exc:
+        typer.echo(
+            "Unable to list existing accounts (needs "
+            f"organizations:ListAccounts): {exc}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     if dry_run:
         typer.echo("Dry run — no accounts will be created:")
         for spec in specs:
-            typer.echo(f"  {spec.account_name}  {spec.email}  -> {spec.ou_id}")
+            account_id = existing.get(spec.email.lower())
+            if account_id:
+                typer.echo(
+                    f"  SKIP    {spec.account_name}  {spec.email}  "
+                    f"(exists: {account_id})"
+                )
+            else:
+                typer.echo(
+                    f"  CREATE  {spec.account_name}  {spec.email}  -> {spec.ou_id}"
+                )
         return
 
     results = []
@@ -248,6 +277,13 @@ def run(
         item_show_func=lambda spec: spec.account_name if spec else "",
     ) as progress:
         for spec in progress:
+            account_id = existing.get(spec.email.lower())
+            if account_id:
+                results.append(AccountResult(
+                    spec.account_name, account_id, "SKIPPED",
+                    "email already exists",
+                ))
+                continue
             results.append(provision_account(org, spec, poll_interval, timeout))
 
     rendered = format_results(results, output_format)
