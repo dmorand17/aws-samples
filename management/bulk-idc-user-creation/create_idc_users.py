@@ -288,6 +288,9 @@ def run(
 
     try:
         specs = parse_manifest(manifest)
+    except OSError as e:
+        typer.echo(f"Cannot read manifest '{manifest}': {e.strerror}.", err=True)
+        raise typer.Exit(1)
     except ValueError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
