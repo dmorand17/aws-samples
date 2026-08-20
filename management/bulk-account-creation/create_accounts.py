@@ -216,7 +216,18 @@ def run(
     except ValueError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
-    _sts_client().get_caller_identity()
+    try:
+        _sts_client().get_caller_identity()
+    except (
+        botocore.exceptions.NoCredentialsError,
+        botocore.exceptions.ClientError,
+    ) as exc:
+        typer.echo(
+            f"AWS credentials error: {exc}. Run 'aws login' (or refresh your "
+            "session) and try again.",
+            err=True,
+        )
+        raise typer.Exit(1)
     org = _org_client()
     try:
         verify_ous(org, {spec.ou_id for spec in specs})

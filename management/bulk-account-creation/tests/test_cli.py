@@ -1,5 +1,6 @@
 import json
 
+import botocore.exceptions
 from typer.testing import CliRunner
 
 import create_accounts
@@ -122,6 +123,39 @@ def test_cli_role_name_sets_spec_role(tmp_path, monkeypatch):
     result = runner.invoke(app, ["--manifest", _manifest(tmp_path)])
     assert result.exit_code == 0
     assert seen == ["OrganizationAccountAccessRole", "OrganizationAccountAccessRole"]
+
+
+def test_cli_expired_credentials_exit_cleanly(tmp_path, monkeypatch):
+    """Expired/invalid credentials exit 1 with a friendly message, no traceback."""
+    class _ExpiredSts:
+        def get_caller_identity(self):
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ExpiredToken", "Message": "token expired"}},
+                "GetCallerIdentity",
+            )
+
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _ExpiredSts())
+    result = runner.invoke(
+        app, ["--manifest", _manifest(tmp_path), "--dry-run"]
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in (result.output or "")
+    assert "credential" in result.output.lower()
+
+
+def test_cli_missing_credentials_exit_cleanly(tmp_path, monkeypatch):
+    """No configured credentials exit 1 with a friendly message, no traceback."""
+    class _NoCredsSts:
+        def get_caller_identity(self):
+            raise botocore.exceptions.NoCredentialsError()
+
+    monkeypatch.setattr(create_accounts, "_sts_client", lambda: _NoCredsSts())
+    result = runner.invoke(
+        app, ["--manifest", _manifest(tmp_path), "--dry-run"]
+    )
+    assert result.exit_code == 1
+    assert "Traceback" not in (result.output or "")
+    assert "credential" in result.output.lower()
 
 
 def test_cli_manifest_value_error_exits_cleanly(tmp_path, monkeypatch):
