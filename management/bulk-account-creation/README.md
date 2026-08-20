@@ -80,15 +80,21 @@ CSV local. Pin to a tag or commit by appending `@<ref>` before the `#`, e.g.
 # Dry run — validate manifest and OUs, create nothing
 uv run create-accounts --manifest accounts.csv --dry-run
 
-# Create accounts, write results as JSON
+# Create accounts, print results as JSON to stdout (pipe or redirect as needed)
+uv run create-accounts --manifest accounts.csv --output-format json > results.json
+
+# Or write results directly to a file
 uv run create-accounts --manifest accounts.csv \
   --output-format json --output-file results.json
 
 # Use a default OU for rows without an explicit ou_id
 uv run create-accounts --manifest accounts.csv \
-  --ou-id ou-abcd-11111111 \
-  --output-format csv --output-file results.csv
+  --ou-id ou-abcd-11111111 --output-format csv
 ```
+
+Results in any format go to stdout by default; the progress bar is written to
+stderr, so redirecting stdout to a file yields clean `csv`/`json`. Use
+`--output-file` to write to a file instead.
 
 ### Options
 
@@ -97,7 +103,7 @@ uv run create-accounts --manifest accounts.csv \
 | `--manifest`      | required | Path to the CSV manifest                             |
 | `--ou-id`         | —        | Default target OU for rows without `ou_id`           |
 | `--output-format` | `stdout` | Result format: `stdout`, `csv`, or `json`            |
-| `--output-file`   | —        | Output file path (required for `csv` and `json`)     |
+| `--output-file`   | —        | Write results to this file instead of stdout         |
 | `--dry-run`       | off      | Validate manifest and OUs without creating anything  |
 | `--poll-interval` | 15.0     | Seconds between status polls per account             |
 | `--timeout`       | 300.0    | Max seconds to wait for each account to provision    |
